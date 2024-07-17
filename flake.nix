@@ -19,6 +19,7 @@
                     pythonEnv = py.withPackages(
                         with py.pkgs; ps: [
                             pip
+                            setuptools
                             venvShellHook
                         ]
                     );
