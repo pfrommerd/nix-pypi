@@ -111,6 +111,7 @@ class URLDistribution(Distribution):
 class Project:
     name: str
     version: Version
+    format: str
     req_python: SpecifierSet | None
     distribution: Distribution
 
@@ -121,16 +122,17 @@ class Project:
         json = {
             "name": self.name,
             "version": str(self.version),
+            "format": self.format,
             "req_python": str(self.req_python) if self.req_python is not None else None,
             "distribution": self.distribution.as_json(),
-            "dependencies": [str(r) for r in self.dependencies],
-            "build_dependencies": [str(r) for r in self.build_dependencies],
+            "dependencies": sorted([str(r) for r in self.dependencies]),
+            "build_dependencies": sorted([str(r) for r in self.build_dependencies]),
         }
         return json
     
     @staticmethod
     def from_json(proj):
-        return Project(proj["name"], Version(proj["version"]),
+        return Project(proj["name"], Version(proj["version"]), proj["format"],
             SpecifierSet(proj["req_python"]) if proj["req_python"] is not None else None, 
             Distribution.from_json(proj["distribution"]),
             [Requirement(r) for r in proj["dependencies"]],
@@ -144,6 +146,8 @@ class ProjectProvider:
     # a cache location (if set to None, not used)
     # maps sources -> parsed projects
     project_cache_dir : Path = field(default_factory=lambda: Path(tempfile.gettempdir()) / "project-cache")
+    # extra build dependencies for project (name, version) tuples
+    extra_build_dependencies : dict[tuple[str, Version], Requirement] = field(default_factory=dict)
 
     async def _project(self, d: Distribution):
         from .parser import ParseError
@@ -180,6 +184,12 @@ class ProjectProvider:
         # filter the projects again, as the distributions
         # might have been overly broad
         projects = [p for p in projects if p is not None and p.version in r.specifier]
+        def map_project(p):
+            k = (p.name, p.version)
+            if k in self.extra_build_dependencies:
+                p = replace(p, build_dependencies=p.build_dependencies + self.extra_build_dependencies[k])
+            return p
+        projects = [map_project(p) for p in projects]
         return projects
 
 # A target is a project with a set of extras
@@ -197,7 +207,8 @@ class Target:
         hash = hashlib.sha256()
         hash.update(s.encode("utf-8"))
         hash = hash.hexdigest()
-        return f"{self.name}-{self.version}-{hash}"
+        id = f"{self.name}-{self.version}-{hash}"
+        return id
 
     @property
     def name(self) -> str:
@@ -250,7 +261,7 @@ class Target:
     def as_json(self):
         return {
             "project": self.project.as_json(),
-            "with_extras": list(self.with_extras)
+            "with_extras": list(sorted(self.with_extras))
         }
     
     @staticmethod
@@ -266,9 +277,9 @@ class Target:
 @dataclass
 class Recipe:
     target: Target
-    # the ids of the dependency recipes
-    dependencies: list[str]
-    build_dependencies: list[str]
+    # the ids of the recipes
+    # for the environemnt to build this target
+    env: list[str]
 
     @property
     def id(self):
@@ -293,13 +304,12 @@ class Recipe:
     def as_json(self):
         return {
             "target": self.target.as_json(),
-            "dependencies": self.dependencies,
-            "build_dependencies": self.build_dependencies
+            "env": sorted(self.env),
         }
 
     @staticmethod
     def from_json(j) -> "Recipe":
         return Recipe(
             Target.from_json(j["target"]),
-            j["dependencies"], j["build_dependencies"]
+            j["env"], 
         )

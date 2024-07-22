@@ -1,18 +1,61 @@
 from dataclasses import dataclass
+from pathlib import Path
 
-from .core import Recipe
+from .core import Recipe, URLDistribution
 
+import base64
 import re
+import hashlib
 
 class NixExporter:
-    def recipe_id(self, r) -> str:
-        ver_str = str(r.version).replace(".","_")
-        return f"{r.name}_{ver_str}"
+    def recipe_ident(self, target_id, env_recipes, build_recipes) -> str:
+        if target_id in env_recipes:
+            name = env_recipes[target_id].name
+            return name
+        elif target_id in build_recipes:
+            r = build_recipes[target_id]
+            ver_str = str(r.version).replace(".","_")
+            name = r.name
+            return f"{name}_{ver_str}"
+        else:
+            env_recipes = ", ".join(env_recipes.keys())
+            build_recipes = ", ".join(build_recipes.keys())
+            raise ValueError(f"Target ID not found: {target_id} in {env_recipes}; build: {build_recipes}")
 
-    def build_expression(self, recipe, recipes):
+    def source_expr(self, dist, root_path):
+        if isinstance(dist, URLDistribution):
+            url = dist.url
+            url_parsed = dist.parsed_url
+            if url_parsed.scheme != "file":
+                hash = bytes.fromhex(dist.content_hash)
+                hash = base64.b64encode(hash).decode("utf-8")
+                hash = f"sha256-{hash}"
+                return f"""fetchurl {{
+                    url="{url}";
+                    hash="{hash}";
+                }}"""
+            else:
+                file_path = Path(url_parsed.path)
+                # find the relative path
+                relative_path = file_path.relative_to(root_path)
+                return f"./{relative_path}"
+        else:
+            raise ValueError(f"Unsupported distribution type: {dist}")
+
+    def build_expression(self, recipe, env_recipes, build_recipes, root_path):
+        src = self.source_expr(recipe.project.distribution, root_path)
+        format = recipe.project.format
+        recipe_ident = lambda target_id: self.recipe_ident(target_id, env_recipes, build_recipes)
+        build_system = " ".join(recipe_ident(r) for r in recipe.env) 
+        if format == "pyproject": format = f'format="pyproject";'
+        else: format = ""
         return f"""buildPythonPackage {{
-            pname="{recipe.name}";
-            version="{recipe.version}";
+            pname = "{recipe.name}";
+            version = "{recipe.version}";
+            {format}
+            src = {src};
+            doCheck = false;
+            build-system = with packages; with buildPackages; [{build_system}];
         }}"""
 
     def format_expr(self, expr):
@@ -25,30 +68,39 @@ class NixExporter:
         ident = 0
         pat = re.compile(r"[\s]+")
         for l in expr.split("\n"):
-            lines.append(" "*ident + l)
+            l = l.strip()
+            if not l: continue
+            if l.startswith("}"):
+                ident = ident - 1
+            lines.append("  "*ident + l)
             if l.endswith("{"):
                 ident = ident + 1
-            elif l.startswith("}"):
-                ident = ident - 1
         expr = "\n".join(lines)
         return expr
 
     def expression(self, 
+                expr_path: Path,
                 env_recipes : dict[str, Recipe], 
-                build_recipes : dict[str, Recipe]
+                build_recipes : dict[str, Recipe],
             ) -> str:
+        root_path = expr_path.parent
         recipes = {}
         recipes.update(build_recipes)
         recipes.update(env_recipes)
 
-        pkgsExpr = "\n".join([f"{r.name} = {self.build_expression(r, recipes)};" for r in env_recipes.values()])
+        recipe_ident = lambda target_id: self.recipe_ident(target_id, env_recipes, build_recipes)
+        build_exp = lambda recipe: self.build_expression(recipe, env_recipes, build_recipes, root_path)
+
+        pkgsExpr = "\n".join([f"{recipe_ident(r.id)} = {build_exp(r)};" for r in env_recipes.values()])
         pkgsExpr = f"{{{pkgsExpr}}}"
-        buildPkgsExpr = "\n".join([f"{r.name} = {self.build_expression(r, recipes)};" for r in build_recipes.values()])
+        buildPkgsExpr = "\n".join([f"{recipe_ident(r.id)} = {build_exp(r)};" for r in build_recipes.values()])
         buildPkgsExpr = f"{{{buildPkgsExpr}}}"
-        inputs = "{buildPythonPackage}"
-        expr = f"""{{
-            packages = {pkgsExpr};
-            buildPackages = {buildPkgsExpr};
+        env = " ".join([recipe_ident(r) for r in env_recipes.keys()])
+        inputs = "{buildPythonPackage, fetchurl}"
+        expr = f"""rec {{
+            packages = rec {pkgsExpr};
+            buildPackages = rec {buildPkgsExpr};
+            env = with packages; [{env}];
         }}"""
         expr = self.format_expr(expr)
         return f"{inputs}: {expr}"

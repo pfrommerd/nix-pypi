@@ -11,6 +11,7 @@ from .core import Project, Target, Recipe
 
 from threading import Event
 
+import json
 import functools
 import asyncio
 import concurrent.futures
@@ -118,6 +119,7 @@ class Resolver:
 
         # create recipes!
         recipe_queue = list(main_targets)
+        selected_targets = {t.id for t in recipe_queue}
         recipes = {}
 
         async def resolve_build_environment(target):
@@ -127,20 +129,25 @@ class Resolver:
             results = await self.resolve_environment(
                 requirements, preferences=preferences
             )
-            # make a map from package name to result Target
-            results = {r.name : r for r in results}
             # set the recipe dependencies/build dependencies...
             recipe = Recipe(target,
-                [results[r.name].id for r in target.dependencies],
-                [results[r.name].id for r in target.build_dependencies]
+                [r.id for r in results]
             )
             recipes[target.id] = recipe
+            # add any requirements if they need
+            # to be added ot the selected targets
+            for target in results:
+                if target.id not in selected_targets:
+                    recipe_queue.append(target)
+                    selected_targets.add(target.id)
+            return recipe
 
         # go through the queue!
         while recipe_queue:
             r = recipe_queue.pop()
-            await resolve_build_environment(r)
-        
+            logger.info(f"Resolving build environment for {r.name}=={r.version}")
+            r = await resolve_build_environment(r)
+
         # split all of the recipes based on whether they
         # are part of the original main environment
         env = {t.id for t in main_targets}

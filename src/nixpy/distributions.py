@@ -98,16 +98,17 @@ class PyPIProvider:
         # map of version -> best_link we found
         versions = {}
         def proc_result(r):
-            curr = versions.get(r.version, None)
+            version = Version(r.version)
+            curr = versions.get(version, None)
             url = r.link.url
             parsed = urllib.parse.urlparse(url)
             hash = None
-            if r.link.dist_info_metadata:
-                if "sha256" in r.link.dist_info_metadata:
-                    hash = r.link.dist_info_metadata["sha256"]
+            if r.link.hashes:
+                if "sha256" in r.link.hashes:
+                    hash = r.link.hashes["sha256"]
             src = URLDistribution(url, hash)
             if hash or curr is None:
-                versions[r.version] = src
+                versions[version] = src
         for r in results: proc_result(r)
         order = sorted(versions.keys(), reverse=True)
         versions = [versions[o] for o in order]

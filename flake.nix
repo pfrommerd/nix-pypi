@@ -16,16 +16,19 @@
         in {
             devShells = forEachSupportedSystem ({ pkgs }: 
                 let py = pkgs.python312; 
-                    env = (import ./requirements.nix) py.pkgs.buildPythonPackage;
+                    env = (import ./requirements.nix) {
+                        buildPythonPackage = py.pkgs.buildPythonPackage;
+                        fetchurl = pkgs.fetchurl;
+                    };
                     pythonEnv = py.withPackages(
-                        with py.pkgs; ps: [
-                            pip
-                            setuptools
-                        ] ++ env.packages
+                        ps: env.env
                     );
                 in {
                 default = pkgs.mkShell {
                     packages = with pkgs; [ pythonEnv fish ];
+                    shellHook = ''
+                    exec fish
+                    '';
                 };
             });
         };

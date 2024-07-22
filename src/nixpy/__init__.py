@@ -1,4 +1,4 @@
-from .core import ProjectProvider, URLDistribution, Recipe
+from .core import ProjectProvider, URLDistribution, Recipe, Target
 from .parser import URLParser, PyProjectParser
 from .resources import CachedResources
 from .distributions import (PyPIProvider, CachedProvider) 
@@ -62,10 +62,11 @@ async def run(project_path, output_path, lock_path, relock=False):
     recipes = {}
     recipes.update(env_recipes)
     recipes.update(build_recipes)
+    logger.info(f"All recipe ids: {','.join(recipes.keys())}")
 
     logger.info("Dependencies:")
-    for r in recipes.values():
-        build_env = r.dependencies + r.build_dependencies
+    for r in env_recipes.values():
+        build_env = r.env
         build_env = ", ".join([f"{recipes[r].name}=={recipes[r].version}" for r in build_env])
         if build_env:
             logger.info(f" {r.name}=={r.version} (building with {build_env})")
@@ -74,7 +75,7 @@ async def run(project_path, output_path, lock_path, relock=False):
 
     logger.info("Build Dependencies:")
     for r in build_recipes.values():
-        build_env = r.dependencies + r.build_dependencies
+        build_env = r.env
         build_env = ", ".join([f"{recipes[r].name}=={recipes[r].version}" for r in build_env])
         if build_env:
             logger.info(f" {r.name}=={r.version} (building with {build_env})")
@@ -83,7 +84,7 @@ async def run(project_path, output_path, lock_path, relock=False):
     
     if output_path is not None:
         exporter = NixExporter()
-        expr = exporter.expression(env_recipes, build_recipes)
+        expr = exporter.expression(output_path, env_recipes, build_recipes)
         logger.info(f"Nix Expression: {expr}")
         with open(output_path, "w") as f:
             f.write(expr)
