@@ -11,7 +11,7 @@
       doCheck = false;
       build-system = with packages;
       with buildPackages;
-      [hatchling_1_25_0 packaging pathspec_0_12_1 pluggy_1_5_0 trove-classifiers_2024_7_2];
+      [hatchling_1_25_0 trove-classifiers_2024_7_2 packaging pluggy_1_5_0 pathspec_0_12_1];
     };
     charset-normalizer = buildPythonPackage {
       pname = "charset-normalizer";
@@ -23,11 +23,12 @@
       doCheck = false;
       build-system = with packages;
       with buildPackages;
-      [];
+      [setuptools];
     };
     setuptools = buildPythonPackage {
       pname = "setuptools";
       version = "71.1.0";
+      format="pyproject";
       src = fetchurl {
         url="https://files.pythonhosted.org/packages/32/c0/5b8013b5a812701c72e3b1e2b378edaa6514d06bee6704a5ab0d7fa52931/setuptools-71.1.0.tar.gz";
         hash="sha256-Ay1C7p+1NuMwh/tmysX4QOuTke0FY3s/KnanyPtHeTY=";
@@ -50,19 +51,6 @@
       with buildPackages;
       [flit-core_3_9_0];
     };
-    pygments = buildPythonPackage {
-      pname = "pygments";
-      version = "2.18.0";
-      format="pyproject";
-      src = fetchurl {
-        url="https://files.pythonhosted.org/packages/8e/62/8336eff65bcbc8e4cb5d05b55faf041285951b6e80f33e2bff2024788f31/pygments-2.18.0.tar.gz";
-        hash="sha256-eG/4AvMukTEb/ziJ9umoboFQX+mfJzW7bWCuDFAE8Zk=";
-      };
-      doCheck = false;
-      build-system = with packages;
-      with buildPackages;
-      [hatchling_1_25_0 packaging pathspec_0_12_1 pluggy_1_5_0 trove-classifiers_2024_7_2];
-    };
     h11 = buildPythonPackage {
       pname = "h11";
       version = "0.14.0";
@@ -73,7 +61,7 @@
       doCheck = false;
       build-system = with packages;
       with buildPackages;
-      [];
+      [setuptools];
     };
     httpcore = buildPythonPackage {
       pname = "httpcore";
@@ -86,7 +74,7 @@
       doCheck = false;
       build-system = with packages;
       with buildPackages;
-      [certifi h11 hatch-fancy-pypi-readme_24_1_0 hatchling_1_25_0 packaging pathspec_0_12_1 pluggy_1_5_0 trove-classifiers_2024_7_2];
+      [certifi hatch-fancy-pypi-readme_24_1_0 hatchling_1_25_0 trove-classifiers_2024_7_2 h11 packaging pluggy_1_5_0 pathspec_0_12_1];
     };
     requests = buildPythonPackage {
       pname = "requests";
@@ -98,7 +86,7 @@
       doCheck = false;
       build-system = with packages;
       with buildPackages;
-      [certifi charset-normalizer idna urllib3];
+      [setuptools idna charset-normalizer certifi urllib3];
     };
     sniffio = buildPythonPackage {
       pname = "sniffio";
@@ -111,7 +99,20 @@
       doCheck = false;
       build-system = with packages;
       with buildPackages;
-      [packaging setuptools setuptools-scm_8_1_0];
+      [setuptools-scm packaging setuptools];
+    };
+    pip = buildPythonPackage {
+      pname = "pip";
+      version = "24.1.2";
+      format="pyproject";
+      src = fetchurl {
+        url="https://files.pythonhosted.org/packages/12/3d/d899257cace386bebb7bdf8a872d5fe3b935cc6381c3ddb76d3e5d99890d/pip-24.1.2.tar.gz";
+        hash="sha256-5UWKC4nydV4O6MDHdhP+UnPgXzN5B4dNZPExcaiYp/8=";
+      };
+      doCheck = false;
+      build-system = with packages;
+      with buildPackages;
+      [wheel_0_43_0 setuptools];
     };
     mdurl = buildPythonPackage {
       pname = "mdurl";
@@ -137,7 +138,7 @@
       doCheck = false;
       build-system = with packages;
       with buildPackages;
-      [flit-core_3_9_0 mdurl];
+      [mdurl flit-core_3_9_0];
     };
     certifi = buildPythonPackage {
       pname = "certifi";
@@ -149,7 +150,7 @@
       doCheck = false;
       build-system = with packages;
       with buildPackages;
-      [];
+      [setuptools];
     };
     anyio = buildPythonPackage {
       pname = "anyio";
@@ -162,7 +163,19 @@
       doCheck = false;
       build-system = with packages;
       with buildPackages;
-      [idna packaging setuptools setuptools-scm_8_1_0 sniffio];
+      [sniffio idna setuptools-scm packaging setuptools];
+    };
+    pygments = buildPythonPackage {
+      pname = "pygments";
+      version = "2.13.0";
+      src = fetchurl {
+        url="https://files.pythonhosted.org/packages/e0/ef/5905cd3642f2337d44143529c941cc3a02e5af16f0f65f81cbef7af452bb/Pygments-2.13.0.tar.gz";
+        hash="sha256-VqhQiulfmOK5vfk6a+WuP32K+Fi0PgLFov8INya+QME=";
+      };
+      doCheck = false;
+      build-system = with packages;
+      with buildPackages;
+      [setuptools];
     };
     httpx = buildPythonPackage {
       pname = "httpx";
@@ -175,7 +188,20 @@
       doCheck = false;
       build-system = with packages;
       with buildPackages;
-      [anyio certifi h11 hatch-fancy-pypi-readme_24_1_0 hatchling_1_25_0 httpcore idna packaging pathspec_0_12_1 pluggy_1_5_0 sniffio trove-classifiers_2024_7_2];
+      [anyio certifi hatch-fancy-pypi-readme_24_1_0 hatchling_1_25_0 trove-classifiers_2024_7_2 packaging sniffio pluggy_1_5_0 httpcore h11 pathspec_0_12_1 idna];
+    };
+    setuptools-scm = buildPythonPackage {
+      pname = "setuptools-scm";
+      version = "8.1.0";
+      format="pyproject";
+      src = fetchurl {
+        url="https://files.pythonhosted.org/packages/4f/a4/00a9ac1b555294710d4a68d2ce8dfdf39d72aa4d769a7395d05218d88a42/setuptools_scm-8.1.0.tar.gz";
+        hash="sha256-Qt6htldxy6k7elFdZaZdgkblYHaKZrkQalksjn8myKc=";
+      };
+      doCheck = false;
+      build-system = with packages;
+      with buildPackages;
+      [packaging setuptools];
     };
     packaging = buildPythonPackage {
       pname = "packaging";
@@ -200,7 +226,7 @@
       doCheck = false;
       build-system = with packages;
       with buildPackages;
-      [setuptools wheel_0_43_0];
+      [wheel_0_43_0 setuptools];
     };
     rich = buildPythonPackage {
       pname = "rich";
@@ -213,7 +239,7 @@
       doCheck = false;
       build-system = with packages;
       with buildPackages;
-      [markdown-it-py mdurl poetry-core_1_9_0 pygments];
+      [pygments markdown-it-py mdurl poetry-core_1_9_0];
     };
     pybind11 = buildPythonPackage {
       pname = "pybind11";
@@ -225,7 +251,7 @@
       doCheck = false;
       build-system = with packages;
       with buildPackages;
-      [setuptools wheel_0_43_0];
+      [wheel_0_43_0 setuptools];
     };
     unearth = buildPythonPackage {
       pname = "unearth";
@@ -238,7 +264,7 @@
       doCheck = false;
       build-system = with packages;
       with buildPackages;
-      [anyio certifi h11 httpcore httpx idna packaging pdm-backend_2_3_3 sniffio];
+      [httpx pdm-backend_2_3_3 anyio certifi sniffio httpcore h11 idna packaging];
     };
     nixpy = buildPythonPackage {
       pname = "nixpy";
@@ -248,13 +274,14 @@
       doCheck = false;
       build-system = with packages;
       with buildPackages;
-      [anyio certifi charset-normalizer h11 httpcore httpx idna markdown-it-py mdurl packaging pybind11 pygments requests resolvelib rich setuptools sniffio unearth urllib3];
+      [unearth pybind11 rich resolvelib packaging setuptools-scm httpx pygments anyio certifi markdown-it-py mdurl pip sniffio requests httpcore h11 idna setuptools charset-normalizer urllib3];
     };
   };
   buildPackages = rec {
     pathspec_0_12_1 = buildPythonPackage {
       pname = "pathspec";
       version = "0.12.1";
+      format="pyproject";
       src = fetchurl {
         url="https://files.pythonhosted.org/packages/ca/bc/f35b8446f4531a7cb215605d100cd88b7ac6f44ab3fc94870c120ab3adbf/pathspec-0.12.1.tar.gz";
         hash="sha256-pILVFQOhqzOxxnpsOBOiaVPb3HHDHayu+ag4xOKfVxI=";
@@ -287,20 +314,7 @@
       doCheck = false;
       build-system = with packages;
       with buildPackages;
-      [packaging setuptools setuptools-scm_8_1_0];
-    };
-    setuptools-scm_8_1_0 = buildPythonPackage {
-      pname = "setuptools-scm";
-      version = "8.1.0";
-      format="pyproject";
-      src = fetchurl {
-        url="https://files.pythonhosted.org/packages/4f/a4/00a9ac1b555294710d4a68d2ce8dfdf39d72aa4d769a7395d05218d88a42/setuptools_scm-8.1.0.tar.gz";
-        hash="sha256-Qt6htldxy6k7elFdZaZdgkblYHaKZrkQalksjn8myKc=";
-      };
-      doCheck = false;
-      build-system = with packages;
-      with buildPackages;
-      [packaging setuptools];
+      [setuptools-scm packaging setuptools];
     };
     trove-classifiers_2024_7_2 = buildPythonPackage {
       pname = "trove-classifiers";
@@ -337,7 +351,7 @@
       doCheck = false;
       build-system = with packages;
       with buildPackages;
-      [packaging pathspec_0_12_1 pluggy_1_5_0 trove-classifiers_2024_7_2];
+      [trove-classifiers_2024_7_2 packaging pluggy_1_5_0 pathspec_0_12_1];
     };
     hatch-fancy-pypi-readme_24_1_0 = buildPythonPackage {
       pname = "hatch-fancy-pypi-readme";
@@ -350,11 +364,12 @@
       doCheck = false;
       build-system = with packages;
       with buildPackages;
-      [hatchling_1_25_0 packaging pathspec_0_12_1 pluggy_1_5_0 trove-classifiers_2024_7_2];
+      [hatchling_1_25_0 trove-classifiers_2024_7_2 packaging pluggy_1_5_0 pathspec_0_12_1];
     };
     wheel_0_43_0 = buildPythonPackage {
       pname = "wheel";
       version = "0.43.0";
+      format="pyproject";
       src = fetchurl {
         url="https://files.pythonhosted.org/packages/b8/d6/ac9cd92ea2ad502ff7c1ab683806a9deb34711a1e2bd8a59814e8fc27e69/wheel-0.43.0.tar.gz";
         hash="sha256-Rl75LGn6XF2i0c+KxAVZqMlAiGr874fc8UuUcIYvHYU=";
@@ -392,5 +407,5 @@
     };
   };
   env = with packages;
-  [urllib3 charset-normalizer setuptools idna pygments h11 httpcore requests sniffio mdurl markdown-it-py certifi anyio httpx packaging resolvelib rich pybind11 unearth nixpy];
+  [urllib3 charset-normalizer setuptools idna h11 httpcore requests sniffio pip mdurl markdown-it-py certifi anyio pygments httpx setuptools-scm packaging resolvelib rich pybind11 unearth nixpy];
 }

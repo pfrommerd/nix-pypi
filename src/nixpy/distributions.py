@@ -5,7 +5,7 @@ import tempfile
 import urllib.parse
 import itertools
 import asyncio
-
+import logging
 
 from packaging.utils import canonicalize_name
 from dataclasses import dataclass, field
@@ -14,6 +14,8 @@ from pathlib import Path
 from .core import Requirement, Version, Resources, Distribution, URLDistribution
 
 from unearth.evaluator import LinkMismatchError
+
+logger = logging.getLogger(__name__)
 
 class DistributionProvider:
     async def find(self, r: Requirement, res: Resources) -> list[Distribution]:
@@ -95,6 +97,16 @@ class PyPIProvider:
     # does the lookup, without caching
     async def find_distributions(self, r: Requirement) -> list[Distribution]:
         results = list(self.finder.find_matches(r))
+
+        # if any scheme is file...
+        local_only = False
+        for r in results:
+            url = r.link.url
+            parsed = urllib.parse.urlparse(url)
+            if parsed.scheme == "file":
+                local_only = True
+                break
+
         # map of version -> best_link we found
         versions = {}
         def proc_result(r):
@@ -102,6 +114,8 @@ class PyPIProvider:
             curr = versions.get(version, None)
             url = r.link.url
             parsed = urllib.parse.urlparse(url)
+            if local_only and parsed.scheme != "file":
+                return None
             hash = None
             if r.link.hashes:
                 if "sha256" in r.link.hashes:
@@ -135,14 +149,16 @@ class CachedProvider(DistributionProvider):
         # if we can't find the sources, req-query the provider
         if not sources:
             sub_r = Requirement(r.name)
-            sources = await self.provider.find_distributions(sub_r)
+            raw_sources = await self.provider.find_distributions(sub_r)
             # resolve the hashes for any sources
             # that don't have hashes (do this before caching!)
-            sources = await asyncio.gather(*[d.resolve(self.res) for d in sources])
+            raw_sources = await asyncio.gather(*[d.resolve(self.res) for d in raw_sources])
             cache_loc.parent.mkdir(parents=True, exist_ok=True)
             with open(cache_loc, "w") as f:
-                sources_json = list([s.as_json() for s in sources])
+                sources_json = list([s.as_json() for s in raw_sources])
                 json.dump(sources_json, f)
             # filter the loaded sources
-            sources = [s for s in sources if s.version in r.specifier or s.version is None]
+            sources = [s for s in raw_sources if s.version in r.specifier or s.version is None]
+            if not sources:
+                logger.warning(f"unable to find sources for: {r}. raw sources: {','.join([str(r) for r in raw_sources])}")
         return sources

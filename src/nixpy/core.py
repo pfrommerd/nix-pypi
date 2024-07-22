@@ -22,6 +22,10 @@ import tempfile
 import asyncio
 import logging
 
+import time
+
+START_TIME = time.time()
+
 logger = logging.getLogger(__name__)
 
 class Distribution:
@@ -68,8 +72,10 @@ class URLDistribution(Distribution):
     @property
     def cache_key(self) -> str:
         if self.content_hash is None:
+            digest = hashlib.sha256((f"{START_TIME}:{self.url}").encode("utf-8"))
+            digest = digest.hexdigest()
             # This url cannot be cached!
-            return None
+            return f"{self.filename}-{digest}"
         else:
             return f"{self.filename}-{self.content_hash}"
 
@@ -148,6 +154,7 @@ class ProjectProvider:
     project_cache_dir : Path = field(default_factory=lambda: Path(tempfile.gettempdir()) / "project-cache")
     # extra build dependencies for project (name, version) tuples
     extra_build_dependencies : dict[tuple[str, Version], Requirement] = field(default_factory=dict)
+    loaded_projects : dict[str, dict[Version, Project]] = field(default_factory=dict)
 
     async def _project(self, d: Distribution):
         from .parser import ParseError
@@ -174,6 +181,10 @@ class ProjectProvider:
         return project
 
     async def find_projects(self, r: Requirement, latest_if_no_spec: bool = True):
+        loaded_versions = self.loaded_projects.setdefault(r.name, {})
+        projects = [p for p in loaded_versions.values() if p.version in r.specifier]
+        if projects:
+            return projects
         srcs = await self.distributions.find_distributions(r)
         # if no specifier, just return the latest
         # version so that we don't waste time solving
@@ -190,6 +201,8 @@ class ProjectProvider:
                 p = replace(p, build_dependencies=p.build_dependencies + self.extra_build_dependencies[k])
             return p
         projects = [map_project(p) for p in projects]
+        for p in projects:
+            loaded_versions[p.version] = p
         return projects
 
 # A target is a project with a set of extras

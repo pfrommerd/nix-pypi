@@ -5,6 +5,7 @@ from .core import Recipe, URLDistribution
 
 import base64
 import re
+import os
 import hashlib
 
 class NixExporter:
@@ -35,20 +36,30 @@ class NixExporter:
                     hash="{hash}";
                 }}"""
             else:
-                file_path = Path(url_parsed.path)
+                file_path = Path(url_parsed.path).resolve()
                 # find the relative path
-                relative_path = file_path.relative_to(root_path)
+                relative_path = os.path.relpath(str(file_path), str(root_path))
+                relative_path = Path(relative_path)
                 return f"./{relative_path}"
         else:
             raise ValueError(f"Unsupported distribution type: {dist}")
 
-    def build_expression(self, recipe, env_recipes, build_recipes, root_path):
-        src = self.source_expr(recipe.project.distribution, root_path)
+    def build_expression(self, recipe, recipes, env_recipes, build_recipes, root_path):
+        dist = recipe.project.distribution
+        src = self.source_expr(dist, root_path)
         format = recipe.project.format
         recipe_ident = lambda target_id: self.recipe_ident(target_id, env_recipes, build_recipes)
-        build_system = " ".join(recipe_ident(r) for r in recipe.env) 
-        if format == "pyproject": format = f'format="pyproject";'
-        else: format = ""
+
+        if dist.is_wheel:
+            build_system = "" 
+        else:
+            build_deps = {r.name for r in recipe.target.build_dependencies}
+            build_system = " ".join(recipe_ident(r) for r in recipe.env)
+
+        if format == "pyproject" or format == "pyproject/poetry":
+            format = f'format="pyproject";'
+        else:
+            format = ""
         return f"""buildPythonPackage {{
             pname = "{recipe.name}";
             version = "{recipe.version}";
@@ -89,7 +100,7 @@ class NixExporter:
         recipes.update(env_recipes)
 
         recipe_ident = lambda target_id: self.recipe_ident(target_id, env_recipes, build_recipes)
-        build_exp = lambda recipe: self.build_expression(recipe, env_recipes, build_recipes, root_path)
+        build_exp = lambda recipe: self.build_expression(recipe, recipes, env_recipes, build_recipes, root_path)
 
         pkgsExpr = "\n".join([f"{recipe_ident(r.id)} = {build_exp(r)};" for r in env_recipes.values()])
         pkgsExpr = f"{{{pkgsExpr}}}"

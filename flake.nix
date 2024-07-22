@@ -21,12 +21,17 @@
                         fetchurl = pkgs.fetchurl;
                     };
                     pythonEnv = py.withPackages(
-                        ps: env.env
+                        ps: 
+                        with py.pkgs; env.env # [pip virtualenv] #env.env
                     );
                 in {
                 default = pkgs.mkShell {
                     packages = with pkgs; [ pythonEnv fish ];
+                    # add a PYTHON_PATH to the current directory
                     shellHook = ''
+                    export PYTHONPATH=$(pwd)/src:$PYTHONPATH
+                    export TMPDIR=/tmp/$USER-nixpy-tmp
+                    mkdir -p $TMPDIR
                     exec fish
                     '';
                 };

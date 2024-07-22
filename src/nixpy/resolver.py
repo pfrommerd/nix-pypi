@@ -66,12 +66,12 @@ class ResolveProvider(AbstractProvider):
                 raise RuntimeError(f"Unable to satisfy hard-constraint: {target.name}=={target.version}")
             return [target]
 
-        logger.debug(f"resolving {requirement}")
+        logger.info(f"resolving {requirement}")
 
         projects = self._find_projects(requirement)
         candidates = [Target(p, set()) for p in projects]
         candidates_fmt = ", ".join([str(p.version) for p in projects])
-        logger.debug(f"found targets {identifier}=={candidates_fmt}")
+        logger.info(f"found targets {identifier}=={candidates_fmt}")
         bad_versions = {c.version for c in incompatibilities[identifier]}
         # find all compatible candidates
         candidates = list([
@@ -116,6 +116,7 @@ class Resolver:
 
     async def resolve_recipes(self, requirements: list[Requirement]):
         main_targets = await self.resolve_environment(requirements)
+        main_env = {t.name : t for t in main_targets}
 
         # create recipes!
         recipe_queue = list(main_targets)
@@ -145,7 +146,8 @@ class Resolver:
         # go through the queue!
         while recipe_queue:
             r = recipe_queue.pop()
-            logger.info(f"Resolving build environment for {r.name}=={r.version}")
+            dep_requirements = ",".join([f"{r.name}{r.specifier}" for r in r.dependencies + r.build_dependencies])
+            logger.info(f"Resolving build environment for {r.name}=={r.version} ({dep_requirements})")
             r = await resolve_build_environment(r)
 
         # split all of the recipes based on whether they

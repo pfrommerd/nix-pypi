@@ -85,11 +85,13 @@ async def run(project_path, output_path, lock_path, relock=False):
     if output_path is not None:
         exporter = NixExporter()
         expr = exporter.expression(output_path, env_recipes, build_recipes)
-        logger.info(f"Nix Expression: {expr}")
         with open(output_path, "w") as f:
             f.write(expr)
 
 def main():
+    import sys
+    import os
+    import setuptools
     import logging
     import argparse
     import asyncio
