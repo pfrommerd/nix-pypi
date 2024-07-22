@@ -16,24 +16,16 @@
         in {
             devShells = forEachSupportedSystem ({ pkgs }: 
                 let py = pkgs.python312; 
+                    env = (import ./requirements.nix) py.pkgs.buildPythonPackage;
                     pythonEnv = py.withPackages(
                         with py.pkgs; ps: [
                             pip
                             setuptools
-                            venvShellHook
-                        ]
+                        ] ++ env.packages
                     );
                 in {
                 default = pkgs.mkShell {
                     packages = with pkgs; [ pythonEnv fish ];
-                    shellHook = ''
-                    VENV=.venv
-                    if test ! -d $VENV; then
-                        python3 -m venv $VENV
-                    fi
-                    source ./$VENV/bin/activate
-                    exec fish
-                    '';
                 };
             });
         };

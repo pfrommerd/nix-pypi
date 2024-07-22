@@ -117,20 +117,10 @@ class Resolver:
         main_targets = await self.resolve_environment(requirements)
 
         # create recipes!
-        recipe_queue = []
+        recipe_queue = list(main_targets)
         recipes = {}
 
-        def get_recipe(target):
-            if (target.name, target.version) in recipes:
-                return recipes[(target.name,target.version)]
-            else:
-                recipe = Recipe(target, [], [])
-                recipe_queue.append(recipe)
-                recipes[(target.name, target.version)] = recipe
-                return recipe
-
-        async def resolve_build_environment(recipe):
-            target = recipe.target
+        async def resolve_build_environment(target):
             requirements = target.dependencies + target.build_dependencies
             # prefer targets for which we intend to build recipes
             preferences = list([r.target for r in recipes.values()])
@@ -140,12 +130,11 @@ class Resolver:
             # make a map from package name to result Target
             results = {r.name : r for r in results}
             # set the recipe dependencies/build dependencies...
-            recipe.dependencies = [get_recipe(results[r.name]) for r in target.dependencies]
-            recipe.build_dependencies = [get_recipe(results[r.name]) for r in target.build_dependencies]
-
-        # populate recipes
-        # for everything in the environment
-        for t in main_targets: get_recipe(t)
+            recipe = Recipe(target,
+                [results[r.name].id for r in target.dependencies],
+                [results[r.name].id for r in target.build_dependencies]
+            )
+            recipes[target.id] = recipe
 
         # go through the queue!
         while recipe_queue:
@@ -154,9 +143,9 @@ class Resolver:
         
         # split all of the recipes based on whether they
         # are part of the original main environment
-        env = {(t.name, t.version) for t in main_targets}
-        main_recipes = [r for nv, r in recipes.items() if nv in env]
-        build_recipes = [r for nv, r in recipes.items() if nv not in env]
+        env = {t.id for t in main_targets}
+        main_recipes = {id: r for id, r in recipes.items() if id in env}
+        build_recipes = {id: r for id, r in recipes.items() if id not in env}
         return main_recipes, build_recipes
 
 def _make_requirement(identifier, extras, specifier, 

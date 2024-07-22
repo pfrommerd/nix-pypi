@@ -192,6 +192,14 @@ class Target:
     _build_dependencies: list[Requirement] | None = None
 
     @property
+    def id(self) -> str:
+        s = json.dumps(self.as_json(), sort_keys=True)
+        hash = hashlib.sha256()
+        hash.update(s.encode("utf-8"))
+        hash = hash.hexdigest()
+        return f"{self.name}-{self.version}-{hash}"
+
+    @property
     def name(self) -> str:
         return self.project.name
     
@@ -238,6 +246,19 @@ class Target:
                 for e in extras:
                     if r.marker.evaluate({"extra": e}):
                         yield r
+    
+    def as_json(self):
+        return {
+            "project": self.project.as_json(),
+            "with_extras": list(self.with_extras)
+        }
+    
+    @staticmethod
+    def from_json(j) -> "Target":
+        return Target(
+            project=Project.from_json(j["project"]),
+            with_extras=set(j["with_extras"])
+        )
 
 # represents an completely
 # resolved Target, including extras,
@@ -245,8 +266,13 @@ class Target:
 @dataclass
 class Recipe:
     target: Target
-    dependencies: list["Recipe"]
-    build_requirements: list["Recipe"]
+    # the ids of the dependency recipes
+    dependencies: list[str]
+    build_dependencies: list[str]
+
+    @property
+    def id(self):
+        return self.target.id
 
     @property
     def project(self):
@@ -263,3 +289,17 @@ class Recipe:
     @property
     def distribution(self):
         return self.target.project.distribution
+
+    def as_json(self):
+        return {
+            "target": self.target.as_json(),
+            "dependencies": self.dependencies,
+            "build_dependencies": self.build_dependencies
+        }
+
+    @staticmethod
+    def from_json(j) -> "Recipe":
+        return Recipe(
+            Target.from_json(j["target"]),
+            j["dependencies"], j["build_dependencies"]
+        )
