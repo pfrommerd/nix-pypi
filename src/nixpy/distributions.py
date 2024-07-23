@@ -121,7 +121,7 @@ class PyPIProvider:
                 if "sha256" in r.link.hashes:
                     hash = r.link.hashes["sha256"]
             src = URLDistribution(url, hash)
-            if hash or curr is None:
+            if curr is None or r.link.is_wheel:
                 versions[version] = src
         for r in results: proc_result(r)
         order = sorted(versions.keys(), reverse=True)

@@ -124,7 +124,7 @@ class Resolver:
         recipes = {}
 
         async def resolve_build_environment(target):
-            requirements = target.dependencies + target.build_dependencies
+            requirements = target.build_dependencies
             # prefer targets for which we intend to build recipes
             preferences = list([r.target for r in recipes.values()])
             results = await self.resolve_environment(

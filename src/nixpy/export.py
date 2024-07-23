@@ -37,10 +37,9 @@ class NixExporter:
                 }}"""
             else:
                 file_path = Path(url_parsed.path).resolve()
-                # find the relative path
                 relative_path = os.path.relpath(str(file_path), str(root_path))
                 relative_path = Path(relative_path)
-                return f"./{relative_path}"
+                return f"{file_path}"
         else:
             raise ValueError(f"Unsupported distribution type: {dist}")
 
@@ -53,11 +52,12 @@ class NixExporter:
         if dist.is_wheel:
             build_system = "" 
         else:
-            build_deps = {r.name for r in recipe.target.build_dependencies}
             build_system = " ".join(recipe_ident(r) for r in recipe.env)
-
+            build_system = f"build-system = with packages; with buildPackages; [{build_system}];"
         if format == "pyproject" or format == "pyproject/poetry":
             format = f'format="pyproject";'
+        elif format == "wheel":
+            format = 'format="wheel";'
         else:
             format = ""
         return f"""buildPythonPackage {{
@@ -65,8 +65,8 @@ class NixExporter:
             version = "{recipe.version}";
             {format}
             src = {src};
+            {build_system}
             doCheck = false;
-            build-system = with packages; with buildPackages; [{build_system}];
         }}"""
 
     def format_expr(self, expr):

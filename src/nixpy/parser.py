@@ -154,7 +154,9 @@ class PyProjectParser:
             raise ParseError(e)
 
         # parse the build requirements
-        build_deps = [Requirement(r) for r in data.get("build-system", {}).get("requires", [])]
+        build_deps = [Requirement(r) for r in data.get("build-system", {}).get("requires", [
+            Requirement("setuptools>=70"), Requirement("wheel>=0.43")
+        ])]
         for r in deps: r.name = canonicalize_name(r.name)
         for r in build_deps: r.name = canonicalize_name(r.name)
         feature_deps = {
