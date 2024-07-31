@@ -88,10 +88,15 @@ class CustomFinder(unearth.finder.PackageFinder):
         return sorted(all_packages, key=self._sort_key, reverse=True)
 
 class PyPIProvider:
-    def __init__(self, index_urls, find_links, extra_links=[]):
+    def __init__(self, index_urls, 
+                    find_links, extra_links=[]):
         self.finder = CustomFinder(
             index_urls=index_urls, find_links=find_links,
-            extra_links=extra_links
+            extra_links=extra_links,
+            target_python=unearth.evaluator.TargetPython(
+                # make up a bogus platform so that we
+                None, platforms=["linux_allarch"]
+            )
         )
 
     # does the lookup, without caching
@@ -146,6 +151,9 @@ class CachedProvider(DistributionProvider):
                 j = json.load(f)
                 sources = [Distribution.from_json(s) for s in j]
             sources = [s for s in sources if s.version in r.specifier or s.version is None]
+            # if the sources are local, ignore the cache
+            if any([s.local for s in sources]):
+                sources = []
         # if we can't find the sources, req-query the provider
         if not sources:
             sub_r = Requirement(r.name)

@@ -19,10 +19,11 @@
                     env = (import ./requirements.nix) {
                         buildPythonPackage = py.pkgs.buildPythonPackage;
                         fetchurl = pkgs.fetchurl;
+                        nixpkgs = pkgs;
+                        python = py;
                     };
                     pythonEnv = py.withPackages(
-                        ps: 
-                        with py.pkgs; env.env # [pip virtualenv] #env.env
+                        ps: [env.packages.nixpy] # [pip virtualenv] #env.env
                     );
                 in {
                 default = pkgs.mkShell {

@@ -1,4 +1,4 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from functools import cached_property
@@ -113,7 +113,7 @@ class URLDistribution(Distribution):
         return await URLParser().parse(self, self.url, res)
 
 
-@dataclass
+@dataclass(frozen=True)
 class Project:
     name: str
     version: Version
@@ -152,8 +152,6 @@ class ProjectProvider:
     # a cache location (if set to None, not used)
     # maps sources -> parsed projects
     project_cache_dir : Path = field(default_factory=lambda: Path(tempfile.gettempdir()) / "project-cache")
-    # extra build dependencies for project (name, version) tuples
-    extra_build_dependencies : dict[tuple[str, Version], Requirement] = field(default_factory=dict)
     loaded_projects : dict[str, dict[Version, Project]] = field(default_factory=dict)
 
     async def _project(self, d: Distribution):
@@ -195,49 +193,28 @@ class ProjectProvider:
         # filter the projects again, as the distributions
         # might have been overly broad
         projects = [p for p in projects if p is not None and p.version in r.specifier]
-        def map_project(p):
-            k = (p.name, p.version)
-            if k in self.extra_build_dependencies:
-                p = replace(p, build_dependencies=p.build_dependencies + self.extra_build_dependencies[k])
-            return p
-        projects = [map_project(p) for p in projects]
         for p in projects:
             loaded_versions[p.version] = p
         return projects
 
-# A target is a project with a set of extras
-@dataclass
-class Target:
+@dataclass(frozen=True)
+class SystemInfo:
+    python_version: list[int]
+    platform: str
+
+# A candidate is a project
+# with a set of extras and some
+# associated system information.
+
+@dataclass(frozen=True)
+class Candidate:
     project: Project
     with_extras: set[str]
+    system: SystemInfo
+
     # The evaluated dependencies, build_dependencies
     _dependencies: list[Requirement] | None = None
     _build_dependencies: list[Requirement] | None = None
-
-    @property
-    def id(self) -> str:
-        s = json.dumps(self.as_json(), sort_keys=True)
-        hash = hashlib.sha256()
-        hash.update(s.encode("utf-8"))
-        hash = hash.hexdigest()
-        id = f"{self.name}-{self.version}-{hash}"
-        return id
-
-    @property
-    def name(self) -> str:
-        return self.project.name
-    
-    @property
-    def version(self) -> Version:
-        return self.project.version
-    
-    @property
-    def req_python(self) -> SpecifierSet | None:
-        return self.project.req_python
-    
-    @property
-    def distribution(self) -> Distribution:
-        return self.project.distribution
 
     @property
     def dependencies(self) -> list[Requirement]:
@@ -258,7 +235,7 @@ class Target:
                 yield r
             else:
                 for e in extras:
-                    if r.marker.evaluate({"extra": e}):
+                    if r.marker.evaluate({"extra": e, "python_version": ".".join(str(i) for i in self.python_version)}):
                         yield r
 
     def _get_build_dependencies(self):
@@ -268,12 +245,47 @@ class Target:
                 yield r
             else:
                 for e in extras:
-                    if r.marker.evaluate({"extra": e}):
+                    if r.marker.evaluate({"extra": e, "python_version": ".".join(str(i) for i in self.python_version)}):
                         yield r
+
+# A target is a candidate
+# instantiated with a set of dependencies
+@dataclass
+class Target:
+    candidate: Candidate
+    dependencies: list[str] # the target IDs to depend on
+    build_dependencies: list[str] # the target IDs to build-depend on
+
+    @property
+    def id(self) -> str:
+        s = json.dumps(self.as_json(), sort_keys=True)
+        hash = hashlib.sha256()
+        hash.update(s.encode("utf-8"))
+        hash = hash.hexdigest()
+        id = f"{self.name}-{self.version}-{hash}"
+        return id
+
+    @property
+    def project(self) -> Project:
+        return self.candidate.project
+
+    @property
+    def name(self) -> str:
+        return self.project.name
+    
+    @property
+    def version(self) -> Version:
+        return self.project.version
+    
+    @property
+    def distribution(self) -> Distribution:
+        return self.project.distribution
+
     
     def as_json(self):
         return {
             "project": self.project.as_json(),
+            "py_version": ".".join(str(i) for i in self.python_version),
             "with_extras": list(sorted(self.with_extras))
         }
     
@@ -281,6 +293,7 @@ class Target:
     def from_json(j) -> "Target":
         return Target(
             project=Project.from_json(j["project"]),
+            python_version=[int(i) for i in j["py_version"].split(".")],
             with_extras=set(j["with_extras"])
         )
 

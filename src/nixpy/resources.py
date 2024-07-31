@@ -55,9 +55,10 @@ class CachedResources(Resources):
             filename = os.path.basename(parsed.path)
             cache_key = f"{filename}-{digest}"
             cache_location = self.cache_dir / cache_key
-            async with super().fetch(url) as f:
-                # write f to the cache
-                with open(cache_location, "wb") as o:
-                    o.write(f.read())
+            if not cache_location.exists():
+                async with super().fetch(url) as f:
+                    # write f to the cache
+                    with open(cache_location, "wb") as o:
+                        o.write(f.read())
             with open(cache_location, "rb") as f:
                 yield f
