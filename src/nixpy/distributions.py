@@ -1,98 +1,51 @@
-import unearth.finder
-import unearth.evaluator
 import json
 import tempfile
 import urllib.parse
 import itertools
 import asyncio
 import logging
+import unearth.finder
 
 from packaging.utils import canonicalize_name
+from packaging.version import Version, InvalidVersion
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from .core import Requirement, Version, Resources, Distribution, URLDistribution
 
-from unearth.evaluator import LinkMismatchError
-
 logger = logging.getLogger(__name__)
 
 class DistributionProvider:
-    async def find(self, r: Requirement, res: Resources) -> list[Distribution]:
-        ...
+    async def find_distributions(self, r: Requirement) -> list[Distribution]:
+        # if url source is specified in the requirement,
+        # return only that source
+        if r.url is not None:
+            return [URLDistribution(r.url, None)]
+        return []
 
-# Allows for source-directory file:// links
-class CustomEvaluator(unearth.evaluator.Evaluator):
-    def evaluate_link(self, link):
-        parsed = urllib.parse.urlparse(link.url)
-        # if we have a file, allow raw directories without extensions
-        # which can be interpreted as local sources
-        if parsed.scheme == "file":
-            try:
-                base = link.filename
-                # get rid of the archive extension, if one exists
-                for a in unearth.utils.ARCHIVE_EXTENSIONS:
-                    if base.endswith(a):
-                        base = base[:-len(a)]
-                        break
-                pkg, has_version, version = base.rpartition("-")
-                pkg = canonicalize_name(pkg)
-                if pkg != canonicalize_name(self.package_name):
-                    return None
-                if not has_version:
-                    raise LinkMismatchError("No version in file!")
-                try:
-                    Version(version)
-                except unearth.evaluator.InvalidVersion as e:
-                    raise LinkMismatchError("Invalid version!")
-                return unearth.evaluator.Package(name=self.package_name, version=version, link=link)
-            except LinkMismatchError as e:
-                logger.trace(f"Skipping link: {e}")
-                return None
-        else:
-            return super().evaluate_link(link)
+@dataclass
+class CombinedProvider(DistributionProvider):
+    providers: list[DistributionProvider]
+    union: bool = False # use a union of the providers (vs the first provider that returns a result)
 
-class CustomFinder(unearth.finder.PackageFinder):
-    def __init__(self, *args, extra_links=None, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.extra_links = [unearth.evaluator.Link(l) for l in extra_links]
+    async def find_distributions(self, r: Requirement) -> list[Distribution]:
+        # if the requirement is a URL, return it
+        dists = await super().find_distributions(r)
+        if dists: return dists
+        all_dists = await asyncio.gather(*[p.find_distributions(r) for p in self.providers])
+        d = []
+        for dists in all_dists:
+            d.extend(dists)
+            if not self.union and dists:
+                break
+        return d
 
-    def build_evaluator(
-                self, package_name: str, allow_yanked: bool = False
-            ) -> unearth.evaluator.Evaluator:
-        format_control = unearth.finder.FormatControl(
-            no_binary=self.no_binary, only_binary=self.only_binary
-        )
-        return CustomEvaluator(
-            package_name=package_name,
-            target_python=self.target_python,
-            ignore_compatibility=self.ignore_compatibility,
-            allow_yanked=allow_yanked,
-            format_control=format_control,
-            exclude_newer_than=self.exclude_newer_than,
-        )
-    
-    # override the _find_packages to include the extra links
-    # if they are specified
-    def _find_packages(self, package_name, allow_yanked: bool = False):
-        packages = super()._find_packages(package_name, allow_yanked)
-        if not self.extra_links:
-            return packages
-        evaluator = self.build_evaluator(package_name, allow_yanked)
-        extra_packages = self._evaluate_links(
-            self.extra_links if self.extra_links is not None else [],
-            evaluator
-        )
-        all_packages = itertools.chain(packages, extra_packages)
-        all_packages = list(all_packages)
-        return sorted(all_packages, key=self._sort_key, reverse=True)
-
-class PyPIProvider:
-    def __init__(self, index_urls, 
-                    find_links, extra_links=[]):
-        self.finder = CustomFinder(
+class PyPIProvider(DistributionProvider):
+    def __init__(self, index_urls=None, find_links=None):
+        index_urls = index_urls or ["https://pypi.org/simple/"]
+        find_links = find_links or []
+        self.finder = unearth.finder.PackageFinder(
             index_urls=index_urls, find_links=find_links,
-            extra_links=extra_links,
             target_python=unearth.evaluator.TargetPython(
                 # make up a bogus platform so that we
                 None, platforms=["linux_allarch"]
@@ -101,26 +54,17 @@ class PyPIProvider:
 
     # does the lookup, without caching
     async def find_distributions(self, r: Requirement) -> list[Distribution]:
+        # handle url-based requirements
+        dist = await super().find_distributions(r)
+        if dist: return dist
+
         results = list(self.finder.find_matches(r))
-
-        # if any scheme is file...
-        local_only = False
-        for r in results:
-            url = r.link.url
-            parsed = urllib.parse.urlparse(url)
-            if parsed.scheme == "file":
-                local_only = True
-                break
-
         # map of version -> best_link we found
         versions = {}
         def proc_result(r):
             version = Version(r.version)
             curr = versions.get(version, None)
             url = r.link.url
-            parsed = urllib.parse.urlparse(url)
-            if local_only and parsed.scheme != "file":
-                return None
             hash = None
             if r.link.hashes:
                 if "sha256" in r.link.hashes:
@@ -134,16 +78,54 @@ class PyPIProvider:
         return versions
 
 @dataclass
+class CustomProvider(DistributionProvider):
+    directory: Path
+    _projects: dict[str, dict[Version, Path]] | None = None
+
+    @property
+    def projects(self):
+        if self._projects is None:
+            self._projects = {}
+            for p in self.directory.iterdir():
+                if p.is_dir():
+                    name, has_version, version = p.name.rpartition("-")
+                    if not has_version:
+                        continue
+                    name = canonicalize_name(name)
+                    try:
+                        version = Version(version)
+                    except InvalidVersion:
+                        logger.warning(f"Unable to parse version: {version}")
+                        continue
+                    versions = self._projects.setdefault(name, {})
+                    versions[version] = p.resolve()
+        return self._projects
+
+    async def find_distributions(self, r: Requirement) -> list[Distribution]:
+        # if url source is specified in the requirement,
+        # return only that source
+        dist = await super().find_distributions(r)
+        if dist: return dist
+
+        dists = []
+        projects = self.projects.get(canonicalize_name(r.name), {})
+        for (version, path) in projects.items():
+            if version in r.specifier:
+                dists.append(URLDistribution(f"file://{path}"))
+        return dists
+
+@dataclass
 class CachedProvider(DistributionProvider):
     res: Resources
     provider : DistributionProvider
     cache_path : Path = field(default_factory=lambda: Path(tempfile.gettempdir()) / "source-cache")
 
     async def find_distributions(self, r: Requirement) -> list[Distribution]:
-        # if url source is specified in the requirement,
-        # return only the URL
-        if r.url is not None:
-            return [URLDistribution(r.url, None)]
+        # if the requirement is a URL, return it
+        dist = await super().find_distributions(r)
+        if dist: return dist
+
+        # look for the cached sources
         cache_loc = self.cache_path / f"{r.name}.json"
         sources = []
         if cache_loc.exists():
@@ -170,3 +152,4 @@ class CachedProvider(DistributionProvider):
             if not sources:
                 logger.warning(f"unable to find sources for: {r}. raw sources: {','.join([str(r) for r in raw_sources])}")
         return sources
+

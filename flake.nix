@@ -16,14 +16,14 @@
         in {
             devShells = forEachSupportedSystem ({ pkgs }: 
                 let py = pkgs.python312; 
-                    env = (import ./requirements.nix) {
+                    requirements = (import ./requirements.nix) {
                         buildPythonPackage = py.pkgs.buildPythonPackage;
                         fetchurl = pkgs.fetchurl;
                         nixpkgs = pkgs;
                         python = py;
                     };
                     pythonEnv = py.withPackages(
-                        ps: [env.packages.nixpy] # [pip virtualenv] #env.env
+                        ps: [requirements.env.nixpy]
                     );
                 in {
                 default = pkgs.mkShell {

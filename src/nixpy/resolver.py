@@ -6,7 +6,8 @@ from packaging.requirements import Requirement
 from packaging.specifiers import SpecifierSet
 from packaging.version import InvalidVersion, Version    
 
-from .core import SystemInfo, Candidate, Target, Recipe
+from .core import SystemInfo, Candidate, Target
+from typing import Sequence
 
 from threading import Event
 
@@ -63,16 +64,18 @@ class ResolveProvider(AbstractProvider):
         if identifier in self.constraints:
             target = self.constraints[identifier]
             if not target.version in requirement.specifier or target.version in incompatibilities:
-                raise RuntimeError(f"Unable to satisfy hard-constraint: {target.name}=={target.version}")
+                logger.warning(f"Unable to satisfy hard-constraint: {target.name}=={target.version} with {requirement}")
             return [target]
 
         logger.info(f"resolving {requirement}")
 
         projects = self._find_projects(requirement)
         # populate the targets
-        candidates = [Candidate(p, extras, self.system_info) for p in projects]
-        candidates_fmt = ", ".join([str(p.version) for p in projects])
+        candidates = [Candidate(p, tuple(sorted(extras)), self.system_info) for p in projects]
+        # candidates_fmt = ", ".join(f"{p.version} ({" ".join(f"{r.name}{r.specifier}" for r in p.requirements)})" for p in projects)
+        candidates_fmt = ", ".join(f"{p.version}" for p in projects)
         logger.info(f"found candidates {identifier}=={candidates_fmt}")
+
         bad_versions = {c.version for c in incompatibilities[identifier]}
         # find all compatible candidates
         candidates = list([
@@ -91,22 +94,36 @@ class ResolveProvider(AbstractProvider):
     def is_satisfied_by(self, requirement, candidate):
         if requirement.name != candidate.name:
             return False
+        if requirement.name in self.constraints:
+            required_version = self.constraints[requirement.name].version
+            return required_version == candidate.version
         return candidate.version in requirement.specifier
 
     def get_dependencies(self, candidate):
-        return candidate.dependencies
-
+        return candidate.evaluated_requirements
 
 # A build candidate is a candidate
-# with all dependencies resolved (but not build dependencies)
+# with all dependencies explicitly resolved 
+# (but not build dependencies)
 @dataclass(frozen=True)
 class BuildCandidate:
     candidate: Candidate
-    dependencies: list[Candidate]
+    # dependencies, including transitive dependencies
+    # (but not build dependencies!)
+    runtime_env: tuple[Candidate]
 
     @staticmethod
     def from_env(candidate: Candidate, env: dict[str: Candidate]):
-        pass
+        queue = set(d.name for d in candidate.evaluated_requirements)
+        deps : dict[str, Candidate] = {}
+        while queue:
+            c = env[queue.pop()]
+            deps[c.name] = c
+            for d in c.evaluated_requirements:
+                if d.name not in deps:
+                    queue.add(d.name)
+        deps = tuple(sorted(deps.values(), key=lambda c: c.name))
+        return BuildCandidate(candidate, deps)
 
 # An environment is a system_info
 # with a map of target_id -> Target
@@ -120,93 +137,93 @@ class Environment:
 class Resolver:
     def __init__(self, project_provider):
         self.project_provider = project_provider
-        self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=5)
+        self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
     
     async def resolve_candidates(self,
                 system_info: SystemInfo,
                 requirements: list[Requirement], *,
                 constraints: list[Candidate] | None = None,
-                preferences: list[Candidate] | None = None
+                preferences: list[Candidate] | None = None,
+                task_name: str | None = None
             ) -> dict[str, Candidate]:
         io_loop = asyncio.get_event_loop()
         resolver = resolvelib.Resolver(
-            ResolveProvider(io_loop, self.python_version, 
-                self.project_provider, constraints, preferences), resolvelib.BaseReporter()
+            ResolveProvider(io_loop, system_info, 
+                self.project_provider, constraints, preferences), 
+                resolvelib.BaseReporter()
         )
         def task():
+            if task_name is not None:
+                logger.info(f"Resolving for {task_name}")
+            logger.info("Resolving requirements: {}".format(",".join(str(r) for r in requirements)))
             return resolver.resolve(requirements, max_rounds=1000)
         result = await io_loop.run_in_executor(self.executor, task)
         env = list(result.mapping.values())
         return {c.name : c for c in env}
 
-    async def resolve_environment(self, system: SystemInfo, requirements: list[Requirement]):
-        main_env_candidates = await self.resolve_environment(system, requirements)
+    async def resolve_environment(self, 
+                    system: SystemInfo,
+                    requirements: list[Requirement]) -> Environment:
         # Lock dependencies for everything in the main environment
+        main_candidates = await self.resolve_candidates(system, requirements)
 
-        resolve_queue = [BuildCandidate.from_env(c, main_env_candidates) for c in main_env_candidates.values()]
-        resolving = set(resolve_queue)
-        # map from BuildCandidate to dict[str, BuildCandidate] of 
-        # resolved environments
+        logger.info("Main environment resolved: {}".format(", ".join(f"{c.name}=={c.version}" for c in main_candidates.values())))
+
+        # map from build_candidate -> task (returning the target)
         resolved = {}
-
-        async def resolve_build_environment(build_candidate):
-            all_deps = build_candidate.dependencies + build_candidate.build_dependencies
+        async def resolve_target(build_candidate : BuildCandidate) -> Target:
+            all_requirements = build_candidate.candidate.evaluated_requirements + build_candidate.candidate.evaluated_build_requirements
+            # the constraints is the non-build environment
+            constraints = build_candidate.runtime_env
+            # resolve the build environment, using the specified 
+            # non-build dependencies
             env = await self.resolve_candidates(
-                system, all_deps
+                system, all_requirements,
+                constraints=constraints,
+                task_name=build_candidate.candidate.name
             )
-            # convert to BuildCandidates
+            # convert the environment to BuildCandidates
             env = { k: BuildCandidate.from_env(c, env) for k,c in env.items() }
-            resolved[build_candidate] = env
-            for n in env.values():
-                if n not in resolving:
-                    resolve_queue.add(n)
-                    resolving.add(n)
-        # resolve everything!
-        await asyncio.gather()
-        # TODO: test for (and break!) cycles 
-        # or the next step will hang forever
-        async def resolve_target(candidate, env):
-            pass
 
-        target_futures = {}
-        recipe_queue = list(main_targets.values())
-        selected_targets = {t.id for t in recipe_queue}
-        recipes = {}
-
-        async def resolve_build_environment(target):
-            requirements = target.build_dependencies + target.dependencies
-            # prefer the same dependencies as the main environment
-            preferences = []
-            if target.id in main_target_ids:
-                preferences = [main_targets[t.name] for t in target.dependencies]
-            results = await self.resolve_environment(
-                requirements, preferences=preferences,
+            # resolve the targets for the Build candidates
+            tasks = []
+            for c in env.values():
+                if c.candidate.name == build_candidate.candidate.name:
+                    continue
+                if c not in resolved:
+                    task = asyncio.create_task(resolve_target(c))
+                    tasks.append(task)
+                    resolved[c] = task
+                else:
+                    tasks.append(resolved[c])
+            env = await asyncio.gather(*tasks)
+            # get the name -> target mapping for the build environment
+            env = { t.name : t for t in env }
+            # return the original candidate
+            dependencies = { r.name : env[r.name].id for r in build_candidate.candidate.evaluated_requirements }
+            build_dependencies = { r.name : env[r.name].id for r in build_candidate.candidate.evaluated_build_requirements }
+            return Target(
+                build_candidate.candidate,
+                dependencies=tuple(dependencies.values()),
+                build_dependencies=tuple(build_dependencies.values())
             )
-            # set the recipe dependencies/build dependencies...
-            recipe = Recipe(target,
-                [r.id for r in results]
-            )
-            recipes[target.id] = recipe
-            # add any requirements if they need
-            # to be added ot the selected targets
-            for target in results:
-                if target.id not in selected_targets:
-                    recipe_queue.append(target)
-                    selected_targets.add(target.id)
-            return recipe
 
-        # go through the queue!
-        while recipe_queue:
-            r = recipe_queue.pop()
-            dep_requirements = ",".join([f"{r.name}{r.specifier}" for r in r.dependencies + r.build_dependencies])
-            logger.info(f"Resolving build environment for {r.name}=={r.version} ({dep_requirements})")
-            r = await resolve_build_environment(r)
-        
-        # split all of the recipes based on whether they
-        # are part of the original main environment
-        main_recipes = {id: r for id, r in recipes.items() if id in main_target_ids}
-        build_recipes = {id: r for id, r in recipes.items() if id not in main_target_ids}
-        return main_recipes, build_recipes
+        for c in main_candidates.values():
+            c = BuildCandidate.from_env(c, main_candidates)
+            task = asyncio.create_task(resolve_target(c))
+            resolved[c] = task
+
+        # the main environment targets
+        env = await asyncio.gather(*resolved.values())
+        env = set(t.id for t in env)
+        # await all of the tasks to get the final targets
+        targets = await asyncio.gather(*resolved.values())
+        targets = {
+            t.id : t for t in targets
+        }
+        return Environment(
+            system, targets, env
+        )
 
 def _make_requirement(identifier, extras, specifier, 
                         url = None, markers = None):

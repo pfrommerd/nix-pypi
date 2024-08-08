@@ -6,10 +6,11 @@ from zipfile import ZipFile
 
 from packaging.requirements import Requirement, SpecifierSet, InvalidRequirement
 from packaging.utils import canonicalize_name
+from packaging.markers import Environment as SystemEnvironment
 from unearth.evaluator import LinkMismatchError, Version
 from string import Template
 
-from typing import Generator, IO
+from typing import Sequence, Any
 
 from .resources import Resources
 
@@ -35,7 +36,9 @@ class Distribution:
             return URLDistribution.from_json(r)
         else: raise ValueError(f"Unexpected source type {r['type']}")
 
-@dataclass
+DistributionProvider = Any
+
+@dataclass(frozen=True)
 class URLDistribution(Distribution):
     url: str
     # if known, if unknown is blank
@@ -121,8 +124,8 @@ class Project:
     req_python: SpecifierSet | None
     distribution: Distribution
 
-    dependencies: list[Requirement]
-    build_dependencies: list[Requirement]
+    requirements: Sequence[Requirement]
+    build_requirements: Sequence[Requirement]
 
     def as_json(self):
         json = {
@@ -131,8 +134,8 @@ class Project:
             "format": self.format,
             "req_python": str(self.req_python) if self.req_python is not None else None,
             "distribution": self.distribution.as_json(),
-            "dependencies": sorted([str(r) for r in self.dependencies]),
-            "build_dependencies": sorted([str(r) for r in self.build_dependencies]),
+            "requirements": sorted([str(r) for r in self.requirements]),
+            "build_requirements": sorted([str(r) for r in self.build_requirements]),
         }
         return json
     
@@ -141,14 +144,14 @@ class Project:
         return Project(proj["name"], Version(proj["version"]), proj["format"],
             SpecifierSet(proj["req_python"]) if proj["req_python"] is not None else None, 
             Distribution.from_json(proj["distribution"]),
-            [Requirement(r) for r in proj["dependencies"]],
-            [Requirement(r) for r in proj["build_dependencies"]],
+            tuple(Requirement(r) for r in proj["requirements"]),
+            tuple(Requirement(r) for r in proj["build_requirements"]),
         )
 
 @dataclass
 class ProjectProvider:
     res: Resources
-    distributions: "DistributionProvider"
+    distributions: DistributionProvider
     # a cache location (if set to None, not used)
     # maps sources -> parsed projects
     project_cache_dir : Path = field(default_factory=lambda: Path(tempfile.gettempdir()) / "project-cache")
@@ -199,8 +202,62 @@ class ProjectProvider:
 
 @dataclass(frozen=True)
 class SystemInfo:
-    python_version: list[int]
-    platform: str
+    python_version: Sequence[int]
+    nix_platform: str
+
+    def as_json(self):
+        return {
+            "python_version": self.python_version,
+            "nix_platform": self.nix_platform
+        }
+    
+    @staticmethod
+    def from_json(j):
+        return SystemInfo(tuple(j["python_version"]), j["nix_platform"])
+
+    @cached_property
+    def python_environment(self) -> SystemEnvironment:
+        implementation_version = ".".join(str(i) for i in self.python_version)
+        implementation_name = "cpython"
+        platform_implementation = "CPython"
+        python_full_version = ".".join(str(i) for i in self.python_version)
+        python_version = ".".join(str(i) for i in self.python_version[:2])
+
+        arch, os = self.nix_platform.split("-")
+        if arch == "x86_64":
+            platform_machine = "x86_64"
+        elif arch == "aarch64":
+            platform_machine = "arm64"
+        elif arch == "powerpc64le":
+            platform_machine = "ppc64le"
+        else: raise ValueError(f"Unrecognized architecture: {arch}")
+
+        if os == "linux":
+            platform_system = "Linux"
+            sys_platform = "linux"
+            os_name = "posix"
+            platform_version = "#1 SMP Wed Sep 23 05:08:15 EDT 2020"
+        elif os == "darwin":
+            platform_system = "Darwin"
+            platform_version = "Darwin Kernel Version 23.2.0: Wed Nov 15 21:55:06 PST 2023; root:xnu-10002.61.3~2/RELEASE_ARM64_T6020'",
+            sys_platform = "darwin"
+            os_name = "posix"
+        else:
+            raise ValueError(f"Unrecognized os: {os}")
+
+        return SystemEnvironment(
+            python_full_version=python_full_version,
+            python_version=python_version,
+            implementation_version=implementation_version,
+            implementation_name=implementation_name,
+
+            platform_system=platform_system,
+            platform_version=platform_version,
+            platform_machine=platform_machine,
+            platform_implementation=platform_implementation,
+            sys_platform=sys_platform,
+            os_name=os_name
+        )
 
 # A candidate is a project
 # with a set of extras and some
@@ -209,52 +266,91 @@ class SystemInfo:
 @dataclass(frozen=True)
 class Candidate:
     project: Project
-    with_extras: set[str]
+    with_extras: Sequence[str]
     system: SystemInfo
 
-    # The evaluated dependencies, build_dependencies
-    _dependencies: list[Requirement] | None = None
-    _build_dependencies: list[Requirement] | None = None
+    @property
+    def name(self) -> str:
+        return self.project.name
 
     @property
-    def dependencies(self) -> list[Requirement]:
-        if self._dependencies is None:
-            self._dependencies = list(self._get_dependencies())
-        return self._dependencies
+    def version(self) -> Version:
+        return self.project.version
 
-    @property
-    def build_dependencies(self):
-        if self._build_dependencies is None:
-            self._build_dependencies = list(self._get_build_dependencies())
-        return self._build_dependencies
+    @cached_property
+    def evaluated_requirements(self) -> list[Requirement]:
+        return list(self._get_requirements())
 
-    def _get_dependencies(self):
+    @cached_property
+    def evaluated_build_requirements(self) -> list[Requirement]:
+        return list(self._get_build_requirements())
+    
+    @staticmethod
+    def _marker_satisfies(marker, env, extras):
+        if marker is None:
+            return True
+        env["extra"] = ""
+        if marker.evaluate(env):
+            return True
+        for e in extras:
+            env["extra"] = e
+            if marker.evaluate(env):
+                return True
+        return False
+
+    def _get_requirements(self):
+        extras = set(self.with_extras) if self.with_extras else {""}
+        yield from Candidate._compute_requirements(self.name, 
+            self.project.requirements, self.system.python_environment, extras
+        )
+
+    def _get_build_requirements(self):
         extras = self.with_extras if self.with_extras else [""]
-        for r in self.project.dependencies:
-            if r.marker is None:
+        yield from Candidate._compute_requirements(self.name, 
+            self.project.build_requirements, self.system.python_environment, extras
+        )
+    
+    @staticmethod
+    def _compute_requirements(own_name, requirements, env, extras):
+        env = dict(env)
+        # collect all of the extras
+        # by self-requirements
+        while True:
+            old_extras = extras
+            for r in requirements:
+                if r.name == own_name and Candidate._marker_satisfies(r.marker, env, extras):
+                    extras = extras.union(r.extras)
+            if old_extras == extras:
+                break
+        for r in requirements:
+            # exclude self-requirements from the final requirements list
+            if r.name == own_name: continue
+            if Candidate._marker_satisfies(r.marker, env, extras):
                 yield r
-            else:
-                for e in extras:
-                    if r.marker.evaluate({"extra": e, "python_version": ".".join(str(i) for i in self.python_version)}):
-                        yield r
 
-    def _get_build_dependencies(self):
-        extras = self.with_extras if self.with_extras else [""]
-        for r in self.project.build_dependencies:
-            if r.marker is None:
-                yield r
-            else:
-                for e in extras:
-                    if r.marker.evaluate({"extra": e, "python_version": ".".join(str(i) for i in self.python_version)}):
-                        yield r
+    def as_json(self):
+        return {
+            "project": self.project.as_json(),
+            "with_extras": list(sorted(self.with_extras)),
+            "system": self.system.as_json()
+        }
+    
+    @staticmethod
+    def from_json(j) -> "Target":
+        return Candidate(
+            project=Project.from_json(j["project"]),
+            system=SystemInfo.from_json(j["system"]),
+            with_extras=frozenset(j["with_extras"])
+        )
 
 # A target is a candidate
 # instantiated with a set of dependencies
-@dataclass
+# and build dependencies.
+@dataclass(frozen=True)
 class Target:
     candidate: Candidate
-    dependencies: list[str] # the target IDs to depend on
-    build_dependencies: list[str] # the target IDs to build-depend on
+    dependencies: Sequence[str] # the target IDs to depend on
+    build_dependencies: Sequence[str] # the target IDs to build-depend on
 
     @property
     def id(self) -> str:
@@ -264,6 +360,14 @@ class Target:
         hash = hash.hexdigest()
         id = f"{self.name}-{self.version}-{hash}"
         return id
+    
+    @property
+    def hash(self) -> str:
+        s = json.dumps(self.as_json(), sort_keys=True)
+        hash = hashlib.sha256()
+        hash.update(s.encode("utf-8"))
+        hash = hash.hexdigest()
+        return hash
 
     @property
     def project(self) -> Project:
@@ -280,62 +384,18 @@ class Target:
     @property
     def distribution(self) -> Distribution:
         return self.project.distribution
-
     
     def as_json(self):
         return {
-            "project": self.project.as_json(),
-            "py_version": ".".join(str(i) for i in self.python_version),
-            "with_extras": list(sorted(self.with_extras))
+            "candidate": self.candidate.as_json(),
+            "dependencies": sorted(self.dependencies),
+            "build_dependencies": sorted(self.build_dependencies)
         }
-    
+
     @staticmethod
-    def from_json(j) -> "Target":
+    def from_json(j):
         return Target(
-            project=Project.from_json(j["project"]),
-            python_version=[int(i) for i in j["py_version"].split(".")],
-            with_extras=set(j["with_extras"])
-        )
-
-# represents an completely
-# resolved Target, including extras,
-# resolved dependencies, and build dependencies
-@dataclass
-class Recipe:
-    target: Target
-    # the ids of the recipes
-    # for the environemnt to build this target
-    env: list[str]
-
-    @property
-    def id(self):
-        return self.target.id
-
-    @property
-    def project(self):
-        return self.target.project
-
-    @property
-    def name(self):
-        return self.project.name
-
-    @property
-    def version(self):
-        return self.project.version
-
-    @property
-    def distribution(self):
-        return self.target.project.distribution
-
-    def as_json(self):
-        return {
-            "target": self.target.as_json(),
-            "env": sorted(self.env),
-        }
-
-    @staticmethod
-    def from_json(j) -> "Recipe":
-        return Recipe(
-            Target.from_json(j["target"]),
-            j["env"], 
+            candidate=Candidate.from_json(j["candidate"]),
+            dependencies=tuple(j["dependencies"]),
+            build_dependencies=tuple(j["build_dependencies"])
         )

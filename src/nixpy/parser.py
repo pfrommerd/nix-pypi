@@ -17,13 +17,14 @@ from pathlib import Path
 from typing import IO, Any
 from string import Template
 
-import glob
-import re
-import sys
-import os
-import json
 import asyncio
-import subprocess
+
+import build
+import build.util
+import build.env
+import pyproject_hooks
+import concurrent.futures
+
 import tempfile
 import zipfile
 import tomllib
@@ -37,22 +38,17 @@ class ParseError(RuntimeError): ...
 
 class Parser:
     def post_process(project):
-        dependencies = [Requirement(str(r)) for r in project.dependencies]
-        build_dependencies = [Requirement(str(r)) for r in project.build_dependencies]
-        for r in dependencies:
+        requirements = tuple(Requirement(str(r)) for r in project.requirements)
+        build_requirements = tuple(Requirement(str(r)) for r in project.build_requirements)
+        for r in requirements:
             r.name = canonicalize_name(r.name)
-        for r in build_dependencies:
+        for r in build_requirements:
             r.name = canonicalize_name(r.name)
-
-        # TODO: handle requirements
-        # that alias different extras
-        dependencies = [d for d in dependencies if d.name != project.name]
-        build_dependencies = [d for d in build_dependencies if d.name != project.name]
 
         return replace(project,
             name=canonicalize_name(project.name),
-            dependencies=list(dependencies),
-            build_dependencies=list(build_dependencies)
+            requirements=requirements,
+            build_requirements=build_requirements
         )
 
 @dataclass
@@ -68,75 +64,11 @@ class PyProjectParser:
             toml_str = toml_str.replace(f"${{{k}}}",v)
         return tomllib.loads(toml_str)
 
-    async def parse_poetry(self, distribution: Distribution, poetry_data : dict[str, Any], version_hint: str | None = None) -> Project:
-        name = poetry_data.get("name", None)
-        version = poetry_data.get("version", None)
-        version = Version(version) if version is not None else version_hint
-        if name is None: raise ParseError("No name entry in poetry data")
-        if version is None: raise ParseError("Unable to determine poetry version")
-        req_python = None
-        dependencies = []
-
-        def parse_poetry_version_spec(version):
-            if not version: return ""
-            version = version.strip()
-            if version.startswith("^"):
-                try:
-                    version = Version(version.lstrip("^"))
-                    version = f"~={version}"
-                    Version(version)
-                    return version
-                except InvalidVersion:
-                    return ""
-            try:
-                version = Version(version)
-            except InvalidVersion:
-                return ""
-            
-            if not version.startswith(">") or version.startswith("<"):
-                return f"=={version}"
-            return version
-        def parse_poetry_req(n, d):
-            n = canonicalize_name(n)
-            if isinstance(d, str):
-                v = parse_poetry_version_spec(d)
-                r = Requirement(f"{n}{v}")
-            elif isinstance(d, dict):
-                if d.get("optional", True):
-                    return None
-                    marker = "; "
-                else:
-                    marker = ""
-                v = parse_poetry_version_spec(d.get("version", None))
-                r = Requirement(f"{n}{v}")
-            return r
-
-        for n, d in poetry_data.get("dependencies").items():
-            r = parse_poetry_req(n, d)
-            if not r: continue
-            if r.name == "python":
-                print(r.specifier)
-                req_python = r.specifier
-            else:
-                dependencies.append(r)
-        project = Project(
-            canonicalize_name(name), version, "pyproject/poetry",
-            req_python, distribution, dependencies, [] 
-        )
-        return project
-
     async def parse(self, distribution: Distribution, toml_path : Path, version_hint : str | None = None) -> Project:
         with open(toml_path, "r") as f:
             data = PyProjectParser.parse_toml(f.read(), toml_path.parent.resolve())
         project = data.get("project", None)
         if project is None:
-            poetry_data = data.get("tool", {}).get("poetry", {})
-            if poetry_data:
-                project = await self.parse_poetry(distribution, poetry_data, version_hint)
-                project = replace(project, 
-                    build_dependencies=await self.parse_pyproject_build_deps(data)
-                )
-                return project
             raise ParseError(f"No project entry in pyproject.toml: {toml_path}")
         name = project.get("name", None)
         if name is None: raise ParseError("No name entry in pyproject.toml")
@@ -148,10 +80,11 @@ class PyProjectParser:
         if "dependencies" in project.get("dynamic", []):
             raise ParseError("Dynamic dependencies are not supported...falling back.")
         try:
-            deps = [Requirement(r) for r in project.get("dependencies", [])]
-            build_deps = [Requirement(r) for r in data.get("build-system", {}).get("requires", [
+            deps = tuple(Requirement(r) for r in project.get("dependencies", []))
+            # get the build dependencies...
+            build_deps = tuple(Requirement(r) for r in data.get("build-system", {}).get("requires", [
                 "setuptools>=70", "wheel>=0.43"
-            ])]
+            ]))
         except InvalidRequirement as e:
             raise ParseError(e)
         project = Project(
@@ -160,8 +93,7 @@ class PyProjectParser:
             req_python, distribution,
             deps,  build_deps
         )
-        project = Parser.post_process(project)
-        return project
+        return Parser.post_process(project)
     
     async def parse_tool_info(self, toml_path: Path, tool_name : str) -> dict[str, str]:
         with open(toml_path, "r") as f:
@@ -181,62 +113,8 @@ class PyProjectParser:
         return build_deps
 
 @dataclass
-class SetuptoolsParser:
-    async def parse(self, distribution: Distribution, project_path : Path, version_hint : Version | None = None) -> Project:
-        cwd = project_path.resolve()
-        setup_py = cwd / "setup.py"
-        project_info = cwd / "nixpy_info.json"
-        env = dict(os.environ)
-        if setup_py.exists():
-            proc = await asyncio.create_subprocess_exec(
-                sys.executable, "setup.py", "egg_info",
-                cwd=cwd, stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                env=env
-            )
-        else:
-            proc = await asyncio.create_subprocess_exec(
-                sys.executable, "-c", "from setuptools import setup; setup()", "egg_info",
-                cwd=cwd, stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                env=env
-            )
-        msg, _ = await proc.communicate()
-        msg = msg.decode("utf-8")
-        match = re.search(r"writing ([\.\-\/\w]*\/PKG-INFO)", msg)
-        if match is None:
-            logger.warning(f"Unable to find PKG-INFO file in: \n{msg}\n\nTrying to find one...")
-            paths = glob.iglob("**/*.egg-info/PKG-INFO", root_dir=cwd, recursive=True)
-            try:
-                info = next(paths)
-                logger.info(f"Found PKG-INFO at: {info}")
-            except StopIteration as e:
-                raise ParseError(f"Can't parse setup.py: {setup_py}.")# Log:\n{msg}")
-        else:
-            info = match.group(1)
-        info = cwd / info
-        with open(info, "rb") as f:
-            project = await MetadataParser().parse(distribution, f, version_hint=version_hint)
-        
-        # parse the build dependencies specially
-        build_dependencies = list(project.build_dependencies)
-        pyproject_path = cwd / "pyproject.toml"
-        if pyproject_path.exists():
-            build_dependencies.extend(await PyProjectParser.parse_pyproject_build_deps(pyproject_path))
-        deps = {d.name : d for d in build_dependencies}
-        if not "setuptools" in deps and project.name != "setuptools":
-            build_dependencies.append(Requirement("setuptools>=70"))
-        # add a recent setuptools version to the build dependencies if necessary
-        project = replace(project,
-            format="setuptools", build_dependencies=build_dependencies
-        )
-        project = Parser.post_process(project)
-        return project
-
-
-@dataclass
 class MetadataParser:
-    async def parse(self, distribution: Distribution, file: IO | EmailMessage, version_hint : Version | None = None) -> Project:
+    def parse_data(self, distribution: Distribution, file: IO | EmailMessage, version_hint : Version | None = None) -> Project:
         if hasattr(file, "get") and hasattr(file, "get_all"):
             msg = file
         else:
@@ -252,7 +130,7 @@ class MetadataParser:
             if version is None:
                 raise ParseError(f"No version in: {msg}")
             deps = msg.get_all("Requires-Dist", [])
-            deps = list([Requirement(r) for r in deps])
+            deps = tuple(Requirement(r) for r in deps)
             req_python = msg.get("Requires-Python")
             req_python = SpecifierSet(req_python) if req_python else None
         except InvalidVersion as e:
@@ -263,27 +141,27 @@ class MetadataParser:
         project = Project(
             name, version, "metadata",
             req_python, distribution,
-            deps, []
+            deps, ()
         )
         project = Parser.post_process(project)
         return project
+    
+    async def parse(self, distribution: Distribution, file: IO, version_hint : Version | None = None) -> Project:
+        return self.parse_data(distribution, file, version_hint)
 
 # Will parse a distribution distribution
 @dataclass
 class SrcDistParser:
     pyproject_parser : PyProjectParser = field(default_factory=lambda: PyProjectParser())
-    setuptools_parser : SetuptoolsParser = field(default_factory=lambda: SetuptoolsParser())
     metadata_parser : MetadataParser = field(default_factory=lambda: MetadataParser())
+    executor : concurrent.futures.ThreadPoolExecutor = concurrent.futures.ThreadPoolExecutor(max_workers=8)
 
     async def parse(self, distribution: Distribution, path: Path, version_hint=None) -> Project:
         children = list(path.iterdir())
         if len(children) == 1 and not ((path / "setup.py").exists() or (path / "pyproject.toml").exists()):
             path = children[0]
         pkg_info = path / "PKG-INFO"
-        setup_py = path / "setup.py"
-        setup_cfg = path / "setup.cfg"
-        # if the source distribution defines a nix
-        # expression, use that instead!
+        # if the source distribution defines a nix expression, use that instead!
         nix_path = path / "default.nix"
         pyproject_path = path / "pyproject.toml"
         project = None
@@ -300,9 +178,38 @@ class SrcDistParser:
                     )
                 except ParseError as _: pass
             if project is None:
-                project = await self.setuptools_parser.parse(distribution, 
-                    path, version_hint=version_hint
-                )
+                # use "build" as a fallback
+                def task():
+                    try:
+                        with build.env.DefaultIsolatedEnv() as env:
+                            builder = build.ProjectBuilder.from_isolated_env(
+                                env,
+                                path,
+                                runner=pyproject_hooks.quiet_subprocess_runner,
+                            )
+                            build_requires = []
+                            build_requires.extend(builder.build_system_requires)
+                            env.install(build_requires)
+                            has_setuptools = any("setuptools" in r for r in build_requires)
+                            if has_setuptools: # ensure setuptools is recent enough
+                                               # that the "legacy backend" is available
+                                env.install(["setuptools>=70"])
+                            extra_requires = builder.get_requires_for_build('wheel')
+                            build_requires.extend(extra_requires)
+                            env.install(extra_requires)
+                            metadata = build.util._project_wheel_metadata(builder)
+                            project = self.metadata_parser.parse_data(distribution, metadata)
+                            build_requires = tuple(Requirement(r) for r in build_requires)
+                            project = replace(project,
+                                build_requirements=build_requires
+                            )
+                            project = Parser.post_process(project)
+                            return project
+                    except build.BuildBackendException as e:
+                        raise ParseError(f"Unable to build project: {e}")
+
+                io_loop = asyncio.get_event_loop()
+                project = await io_loop.run_in_executor(self.executor, task)
         except PermissionError:
             raise ParseError(f"Bad permissions: {path}")
         # use setuptools to build the project even if pyproject.toml is present
