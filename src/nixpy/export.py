@@ -91,7 +91,7 @@ class NixPyPackage:
                 import_expr = f"(import (fetchurl {{ url=\"{dist.url}\"; hash=\"{hash}\"; }}))"
             return f"""{import_expr} {{
                 buildPythonPackage=buildPythonPackage;
-                build_system={build_system};
+                build-system={build_system};
                 dependencies={dependencies};
                 fetchurl=fetchurl;
                 nixpkgs=nixpkgs;
@@ -116,7 +116,7 @@ class NixPyPackage:
         
         build_system, dependencies = "", ""
         if target.build_dependencies:
-            build_system = f"build_system = with packages; [{' '.join(resolve_target_id(t) for t in target.build_dependencies)}];"
+            build_system = f"build-system = with packages; [{' '.join(resolve_target_id(t) for t in target.build_dependencies)}];"
         if target.dependencies:
             dependencies = f"dependencies = with packages; [{' '.join(resolve_target_id(t) for t in target.dependencies)}];"
         return f"""buildPythonPackage {{
@@ -126,6 +126,7 @@ class NixPyPackage:
             src = {src};
             {build_system}
             {dependencies}
+            doCheck=false;
         }}
         """
 

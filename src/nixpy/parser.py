@@ -85,6 +85,7 @@ class PyProjectParser:
             build_deps = tuple(Requirement(r) for r in data.get("build-system", {}).get("requires", [
                 "setuptools>=70", "wheel>=0.43"
             ]))
+            build_system = data.get("build-system", {}).get("build-backend", None)
         except InvalidRequirement as e:
             raise ParseError(e)
         project = Project(
@@ -93,6 +94,9 @@ class PyProjectParser:
             req_python, distribution,
             deps,  build_deps
         )
+        # "bad" build systems that require special handling and can't be directly parsed
+        if build_system in ["scikit_build_core.build"]:
+            raise ParseError(f"Unable to directly parse build system: {build_system}")
         return Parser.post_process(project)
     
     async def parse_tool_info(self, toml_path: Path, tool_name : str) -> dict[str, str]:

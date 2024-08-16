@@ -20,9 +20,9 @@ license = {text = "MIT"}
 nixpy = "nixpy:main"
 
 [build-system]
-requires = ["setuptools >= 61.0"]
+requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [tool.nixpy]
 python-version = "3.12"
-platforms = ["x86_64-linux", "aarch64-darwin"]
+platforms = ["x86_64-linux", "powerpc64le-linux", "aarch64-darwin"]

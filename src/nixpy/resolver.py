@@ -65,6 +65,7 @@ class ResolveProvider(AbstractProvider):
             target = self.constraints[identifier]
             if not target.version in requirement.specifier or target.version in incompatibilities:
                 logger.warning(f"Unable to satisfy hard-constraint: {target.name}=={target.version} with {requirement}")
+                raise RuntimeError(f"Unable to satisfy hard-constraint: {target.name}=={target.version} with {requirement}")
             return [target]
 
         logger.info(f"resolving {requirement}")
@@ -172,36 +173,56 @@ class Resolver:
         # map from build_candidate -> task (returning the target)
         resolved = {}
         async def resolve_target(build_candidate : BuildCandidate) -> Target:
-            all_requirements = build_candidate.candidate.evaluated_requirements + build_candidate.candidate.evaluated_build_requirements
-            # the constraints is the non-build environment
-            constraints = build_candidate.runtime_env
+            requirements = build_candidate.candidate.evaluated_requirements
+            build_requirements = build_candidate.candidate.evaluated_build_requirements
+            # if we have numpy as a requirement, 
+            # don't build against a different version
+            # has_numpy = any(r.name == "numpy" for r in requirements)
+            # build_requirements = [r for r in build_candidate.candidate.evaluated_build_requirements if not (r.name == "numpy" and has_numpy)]
+
+            all_requirements = requirements + build_requirements
             # resolve the build environment, using the specified 
             # non-build dependencies
-            env = await self.resolve_candidates(
+            build_env = await self.resolve_candidates(
                 system, all_requirements,
-                constraints=constraints,
+                preferences=build_candidate.runtime_env,
                 task_name=build_candidate.candidate.name
             )
             # convert the environment to BuildCandidates
-            env = { k: BuildCandidate.from_env(c, env) for k,c in env.items() }
+            build_env = { k: BuildCandidate.from_env(c, build_env) for k,c in build_env.items() }
+
+            runtime_env = { c.name: c for c in build_candidate.runtime_env}
+            runtime_env = { k: BuildCandidate.from_env(c, runtime_env) for k,c in runtime_env.items() }
 
             # resolve the targets for the Build candidates
-            tasks = []
-            for c in env.values():
+            build_tasks = []
+            for c in build_env.values():
                 if c.candidate.name == build_candidate.candidate.name:
                     continue
                 if c not in resolved:
                     task = asyncio.create_task(resolve_target(c))
-                    tasks.append(task)
+                    build_tasks.append(task)
                     resolved[c] = task
                 else:
-                    tasks.append(resolved[c])
-            env = await asyncio.gather(*tasks)
+                    build_tasks.append(resolved[c])
+            build_env = await asyncio.gather(*build_tasks)
+            # get the dependency env
+            dep_tasks = []
+            for c in runtime_env.values():
+                if c not in resolved:
+                    task = asyncio.create_task(resolve_target(c))
+                    dep_tasks.append(task)
+                    resolved[c] = task
+                else:
+                    dep_tasks.append(resolved[c])
+
+            runtime_env = await asyncio.gather(*dep_tasks)
+
             # get the name -> target mapping for the build environment
-            env = { t.name : t for t in env }
-            # return the original candidate
-            dependencies = { r.name : env[r.name].id for r in build_candidate.candidate.evaluated_requirements }
-            build_dependencies = { r.name : env[r.name].id for r in build_candidate.candidate.evaluated_build_requirements }
+            build_env = { t.name : t for t in build_env }
+            runtime_env = { t.name : t for t in runtime_env }
+            dependencies = { r.name : runtime_env[r.name].id for r in build_candidate.candidate.evaluated_requirements }
+            build_dependencies = { r.name : build_env[r.name].id for r in build_candidate.candidate.evaluated_build_requirements }
             return Target(
                 build_candidate.candidate,
                 dependencies=tuple(dependencies.values()),
