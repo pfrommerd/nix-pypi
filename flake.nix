@@ -29,7 +29,7 @@
                     pythonEnv = py.withPackages(
                         ps: [requirements.env.nixpy]
                     );
-		    atticCli = attic.packages."${pkgs.system}".attic-static;
+		    atticCli = attic.packages."${pkgs.system}".attic;
                 in {
                 default = pkgs.mkShell {
                     packages = with pkgs; [ pythonEnv fish atticCli ];
