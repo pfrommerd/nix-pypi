@@ -1,4 +1,4 @@
-{buildPythonPackage, fetchurl, nixpkgs, python}: rec {
+{buildPythonPackage, fetchurl, nixpkgs, python, nixpy-custom ? {}}: rec {
   packages = rec {
     nixpy = buildPythonPackage {
       pname = "nixpy";
@@ -9,17 +9,7 @@
       [setuptools];
       dependencies = with packages;
       [unearth rich resolvelib packaging requests build];
-    } ;
-    unearth = buildPythonPackage {
-      pname = "unearth";
-      version = "0.16.1";
-      format="wheel";
-      src = fetchurl {
-        url="https://files.pythonhosted.org/packages/f3/08/ad4427cf0d0e19053d7e0b3405f2e6dcb697fb9bff61335a2024729402e2/unearth-0.16.1-py3-none-any.whl";
-        hash="sha256-WlmKwaPxhRRPrcneR/EEO/+AXDYRj/xA+B75j/Iujjc=";
-      };
-      dependencies = with packages;
-      [httpx packaging];
+      doCheck=false;
     } ;
     rich = buildPythonPackage {
       pname = "rich";
@@ -31,6 +21,7 @@
       };
       dependencies = with packages;
       [markdown-it-py pygments];
+      doCheck=false;
     } ;
     resolvelib = buildPythonPackage {
       pname = "resolvelib";
@@ -40,6 +31,7 @@
         url="https://files.pythonhosted.org/packages/d2/fc/e9ccf0521607bcd244aa0b3fbd574f71b65e9ce6a112c83af988bbbe2e23/resolvelib-1.0.1-py2.py3-none-any.whl";
         hash="sha256-0tpF0ajf7oG91ZFkd4PjQO87yxBLVMOD9w1CLvXMfb8=";
       };
+      doCheck=false;
     } ;
     packaging = buildPythonPackage {
       pname = "packaging";
@@ -49,6 +41,7 @@
         url="https://files.pythonhosted.org/packages/08/aa/cc0199a5f0ad350994d660967a8efb233fe0416e4639146c089643407ce6/packaging-24.1-py3-none-any.whl";
         hash="sha256-W48iF9vb0vfzhMQcYoVE5tUvLQ9TxtDD6mGqXR1/8SQ=";
       };
+      doCheck=false;
     } ;
     build = buildPythonPackage {
       pname = "build";
@@ -60,6 +53,29 @@
       };
       dependencies = with packages;
       [packaging pyproject-hooks];
+      doCheck=false;
+    } ;
+    pyproject-hooks = buildPythonPackage {
+      pname = "pyproject-hooks";
+      version = "1.1.0";
+      format="wheel";
+      src = fetchurl {
+        url="https://files.pythonhosted.org/packages/ae/f3/431b9d5fe7d14af7a32340792ef43b8a714e7726f1d7b69cc4e8e7a3f1d7/pyproject_hooks-1.1.0-py3-none-any.whl";
+        hash="sha256-fO7v6a7GOhBkwY2Tm9w63y2KoZiKUQr+wVFRV4sjKqI=";
+      };
+      doCheck=false;
+    } ;
+    unearth = buildPythonPackage {
+      pname = "unearth";
+      version = "0.17.0";
+      format="wheel";
+      src = fetchurl {
+        url="https://files.pythonhosted.org/packages/03/c5/6c168746280d035e0eb511e20ee8256f11353bc3521ba92d36b27e347a71/unearth-0.17.0-py3-none-any.whl";
+        hash="sha256-gcLx+tW7AGU3HfIhk0w8riLcdSbJYG7IP7NAXDrP1eY=";
+      };
+      dependencies = with packages;
+      [packaging httpx];
+      doCheck=false;
     } ;
     httpx = buildPythonPackage {
       pname = "httpx";
@@ -71,15 +87,7 @@
       };
       dependencies = with packages;
       [anyio certifi httpcore idna sniffio];
-    } ;
-    pyproject-hooks = buildPythonPackage {
-      pname = "pyproject-hooks";
-      version = "1.1.0";
-      format="wheel";
-      src = fetchurl {
-        url="https://files.pythonhosted.org/packages/ae/f3/431b9d5fe7d14af7a32340792ef43b8a714e7726f1d7b69cc4e8e7a3f1d7/pyproject_hooks-1.1.0-py3-none-any.whl";
-        hash="sha256-fO7v6a7GOhBkwY2Tm9w63y2KoZiKUQr+wVFRV4sjKqI=";
-      };
+      doCheck=false;
     } ;
     anyio = buildPythonPackage {
       pname = "anyio";
@@ -91,6 +99,7 @@
       };
       dependencies = with packages;
       [idna sniffio];
+      doCheck=false;
     } ;
     certifi = buildPythonPackage {
       pname = "certifi";
@@ -100,6 +109,7 @@
         url="https://files.pythonhosted.org/packages/1c/d5/c84e1a17bf61d4df64ca866a1c9a913874b4e9bdc131ec689a0ad013fb36/certifi-2024.7.4-py3-none-any.whl";
         hash="sha256-wZjiGxKJwquF7k5nu0tO8+rQiSBZkBqNW2IvJKEQHpA=";
       };
+      doCheck=false;
     } ;
     idna = buildPythonPackage {
       pname = "idna";
@@ -109,6 +119,7 @@
         url="https://files.pythonhosted.org/packages/e5/3e/741d8c82801c347547f8a2a06aa57dbb1992be9e948df2ea0eda2c8b79e8/idna-3.7-py3-none-any.whl";
         hash="sha256-gv7h/Hit1DSS06GJi/ptipBMyX2EJ/aD7Y55jQd2GqA=";
       };
+      doCheck=false;
     } ;
     sniffio = buildPythonPackage {
       pname = "sniffio";
@@ -118,6 +129,7 @@
         url="https://files.pythonhosted.org/packages/e9/44/75a9c9421471a6c4805dbf2356f7c181a29c1879239abab1ea2cc8f38b40/sniffio-1.3.1-py3-none-any.whl";
         hash="sha256-L22kGNHx4P3dhER49BaA55TmBRkVeRoDT/ZeXxAFJaI=";
       };
+      doCheck=false;
     } ;
     markdown-it-py = buildPythonPackage {
       pname = "markdown-it-py";
@@ -129,6 +141,7 @@
       };
       dependencies = with packages;
       [mdurl];
+      doCheck=false;
     } ;
     mdurl = buildPythonPackage {
       pname = "mdurl";
@@ -138,6 +151,7 @@
         url="https://files.pythonhosted.org/packages/b3/38/89ba8ad64ae25be8de66a6d463314cf1eb366222074cfda9ee839c56a4b4/mdurl-0.1.2-py3-none-any.whl";
         hash="sha256-hACKQeUWFaSfyZZhkf+RUJ48QLk5F25kP9UKXCGWuPg=";
       };
+      doCheck=false;
     } ;
     requests = buildPythonPackage {
       pname = "requests";
@@ -149,6 +163,7 @@
       };
       dependencies = with packages;
       [certifi charset-normalizer idna urllib3];
+      doCheck=false;
     } ;
     httpcore = buildPythonPackage {
       pname = "httpcore";
@@ -160,6 +175,7 @@
       };
       dependencies = with packages;
       [certifi h11];
+      doCheck=false;
     } ;
     h11 = buildPythonPackage {
       pname = "h11";
@@ -169,6 +185,7 @@
         url="https://files.pythonhosted.org/packages/95/04/ff642e65ad6b90db43e668d70ffb6736436c7ce41fcc549f4e9472234127/h11-0.14.0-py3-none-any.whl";
         hash="sha256-4/5KxLhRxGjMg2PVANtSwurQNgIHIwJKEJ03NG76p2E=";
       };
+      doCheck=false;
     } ;
     pygments = buildPythonPackage {
       pname = "pygments";
@@ -178,6 +195,7 @@
         url="https://files.pythonhosted.org/packages/f7/3f/01c8b82017c199075f8f788d0d906b9ffbbc5a47dc9918a945e13d5a2bda/pygments-2.18.0-py3-none-any.whl";
         hash="sha256-uOasoFI/Ordv7lF5nEiOOHgqwG6vz5XnuoMphcjnsTo=";
       };
+      doCheck=false;
     } ;
     charset-normalizer = buildPythonPackage {
       pname = "charset-normalizer";
@@ -187,6 +205,7 @@
         url="https://files.pythonhosted.org/packages/28/76/e6222113b83e3622caa4bb41032d0b1bf785250607392e1b778aca0b8a7d/charset_normalizer-3.3.2-py3-none-any.whl";
         hash="sha256-Pk0fZYcyLSeIg2qZxpBi+7CRMx7JQOAtEtF5wdU+Jfw=";
       };
+      doCheck=false;
     } ;
     urllib3 = buildPythonPackage {
       pname = "urllib3";
@@ -196,63 +215,88 @@
         url="https://files.pythonhosted.org/packages/ca/1c/89ffc63a9605b583d5df2be791a27bc1a42b7c32bab68d3c8f2f73a98cd4/urllib3-2.2.2-py3-none-any.whl";
         hash="sha256-pEiy9k1oYVVGgDfhrOny0hmXduF/CkZhBIDTEfc+NHI=";
       };
+      doCheck=false;
     } ;
     setuptools = buildPythonPackage {
       pname = "setuptools";
-      version = "72.1.0";
+      version = "72.2.0";
       format="wheel";
       src = fetchurl {
-        url="https://files.pythonhosted.org/packages/e1/58/e0ef3b9974a04ce9cde2a7a33881ddcb2d68450803745804545cdd8d258f/setuptools-72.1.0-py3-none-any.whl";
-        hash="sha256-WgPhhgz1a7bvSM4Yaw5Vf9ukMyN0gammJRdsKDG+FdE=";
+        url="https://files.pythonhosted.org/packages/6e/ec/06715d912351edc453e37f93f3fc80dcffd5ca0e70386c87529aca296f05/setuptools-72.2.0-py3-none-any.whl";
+        hash="sha256-8R3ZS3uuOhVqlewVHyTkY3+0+hnIeOTRkb+4stgnKMQ=";
       };
+      doCheck=false;
     } ;
   };
   envs = {
     x86_64-linux = with packages;
     {
+      certifi = certifi;
+      packaging = packaging;
+      anyio = anyio;
+      charset-normalizer = charset-normalizer;
+      mdurl = mdurl;
+      requests = requests;
+      markdown-it-py = markdown-it-py;
+      urllib3 = urllib3;
+      unearth = unearth;
+      idna = idna;
+      h11 = h11;
+      pyproject-hooks = pyproject-hooks;
+      rich = rich;
+      nixpy = nixpy;
+      build = build;
+      sniffio = sniffio;
+      httpcore = httpcore;
+      resolvelib = resolvelib;
+      pygments = pygments;
+      httpx = httpx;
+    };
+    powerpc64le-linux = with packages;
+    {
       pygments = pygments;
       urllib3 = urllib3;
       packaging = packaging;
-      anyio = anyio;
       pyproject-hooks = pyproject-hooks;
+      markdown-it-py = markdown-it-py;
+      httpcore = httpcore;
+      nixpy = nixpy;
+      httpx = httpx;
+      anyio = anyio;
+      charset-normalizer = charset-normalizer;
+      idna = idna;
+      requests = requests;
+      sniffio = sniffio;
+      h11 = h11;
+      unearth = unearth;
       mdurl = mdurl;
       certifi = certifi;
-      resolvelib = resolvelib;
-      nixpy = nixpy;
-      unearth = unearth;
-      idna = idna;
-      charset-normalizer = charset-normalizer;
-      requests = requests;
-      build = build;
-      markdown-it-py = markdown-it-py;
-      httpx = httpx;
       rich = rich;
-      httpcore = httpcore;
-      h11 = h11;
-      sniffio = sniffio;
+      build = build;
+      resolvelib = resolvelib;
     };
     aarch64-darwin = with packages;
     {
-      pygments = pygments;
-      requests = requests;
-      urllib3 = urllib3;
-      h11 = h11;
-      resolvelib = resolvelib;
-      httpcore = httpcore;
-      anyio = anyio;
       rich = rich;
-      sniffio = sniffio;
-      mdurl = mdurl;
-      certifi = certifi;
-      httpx = httpx;
-      idna = idna;
-      markdown-it-py = markdown-it-py;
+      requests = requests;
       build = build;
-      charset-normalizer = charset-normalizer;
-      packaging = packaging;
-      unearth = unearth;
-      nixpy = nixpy;
+      httpcore = httpcore;
       pyproject-hooks = pyproject-hooks;
+      packaging = packaging;
+      httpx = httpx;
+      charset-normalizer = charset-normalizer;
+      resolvelib = resolvelib;
+      sniffio = sniffio;
+      anyio = anyio;
+      markdown-it-py = markdown-it-py;
+      certifi = certifi;
+      pygments = pygments;
+      nixpy = nixpy;
+      h11 = h11;
+      unearth = unearth;
+      idna = idna;
+      urllib3 = urllib3;
+      mdurl = mdurl;
     };
   };
   env = envs.${
