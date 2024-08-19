@@ -1,7 +1,6 @@
 {
     inputs = {
         attic.url = "github:inductive-research/attic";
-	attic.inputs.nixpkgs.url = "flake:nixpkgs";
 	attic.inputs.flake-utils.url = "github:inductive-research/flake-utils";
     };
     outputs = { self, nixpkgs, attic }:
