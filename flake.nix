@@ -1,5 +1,10 @@
 {
-    outputs = { self, nixpkgs }:
+    inputs = {
+        attic.url = "github:inductive-research/attic";
+	attic.inputs.nixpkgs.url = "flake:nixpkgs";
+	attic.inputs.flake-utils.url = "github:inductive-research/flake-utils";
+    };
+    outputs = { self, nixpkgs, attic }:
         let
         # The systems supported for this flake
         supportedSystems = [
@@ -25,9 +30,10 @@
                     pythonEnv = py.withPackages(
                         ps: [requirements.env.nixpy]
                     );
+		    atticCli = attic.packages."${pkgs.system}".attic-static;
                 in {
                 default = pkgs.mkShell {
-                    packages = with pkgs; [ pythonEnv fish ];
+                    packages = with pkgs; [ pythonEnv fish atticCli ];
                     # add a PYTHON_PATH to the current directory
                     shellHook = ''
                     export PYTHONPATH=$(pwd)/src:$PYTHONPATH
