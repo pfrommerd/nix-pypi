@@ -13,12 +13,14 @@
             "aarch64-darwin" # 64-bit ARM macOS
             "powerpc64le-linux"
         ];
+	atticFlake = attic;
 
         forEachSupportedSystem = f: nixpkgs.lib.genAttrs supportedSystems (system: f {
             pkgs = import nixpkgs { inherit system; };
+	    attic = atticFlake.packages."${system}".attic;
         });
         in {
-            devShells = forEachSupportedSystem ({ pkgs }: 
+            devShells = forEachSupportedSystem ({ pkgs, attic }: 
                 let py = pkgs.python312; 
                     requirements = (import ./requirements.nix) {
                         buildPythonPackage = py.pkgs.buildPythonPackage;
@@ -29,10 +31,9 @@
                     pythonEnv = py.withPackages(
                         ps: [requirements.env.nixpy]
                     );
-		    atticCli = attic.packages."${pkgs.system}".attic;
                 in {
                 default = pkgs.mkShell {
-                    packages = with pkgs; [ pythonEnv fish atticCli ];
+                    packages = with pkgs; [ pythonEnv fish attic];
                     # add a PYTHON_PATH to the current directory
                     shellHook = ''
                     export PYTHONPATH=$(pwd)/src:$PYTHONPATH
@@ -42,5 +43,22 @@
                     '';
                 };
             });
+	    packages = forEachSupportedSystem({pkgs, attic}:
+                let py = pkgs.python312; 
+                    requirements = (import ./requirements.nix) {
+                        buildPythonPackage = py.pkgs.buildPythonPackage;
+                        fetchurl = pkgs.fetchurl;
+                        nixpkgs = pkgs;
+                        python = py;
+                    };
+                    pythonEnv = py.withPackages(
+                        ps: [requirements.env.nixpy]
+                    );
+		in {
+		     default=requirements.env.nixpy;
+		     nixpy=requirements.env.nixpy;
+		     attic=attic;
+		}
+	    );
         };
 }
