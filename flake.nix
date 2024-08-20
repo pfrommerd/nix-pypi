@@ -1,7 +1,11 @@
 {
     inputs = {
-        attic.url = "github:inductive-research/attic";
-	attic.inputs.flake-utils.url = "github:inductive-research/flake-utils";
+	nixpkgs.url = "github:inductive-research/nixpkgs";
+	attic = {
+            url = "github:inductive-research/attic";
+            inputs.flake-utils.url = "github:inductive-research/flake-utils";
+            inputs.nixpkgs.follows = "nixpkgs";
+        };
     };
     outputs = { self, nixpkgs, attic }:
         let
