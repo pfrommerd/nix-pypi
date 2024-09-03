@@ -74,18 +74,18 @@
         "type": "github"
       },
       "original": {
-        "owner": "numtide",
+        "owner": "inductive-research",
         "repo": "flake-utils",
         "type": "github"
       }
     },
     "nixpkgs": {
       "locked": {
-        "lastModified": 1724159640,
-        "narHash": "sha256-KQ/N1+A+HkSOUo+aVIr/Qi+06wJ9JcoyOd4X0iDjFk4=",
+        "lastModified": 1724533601,
+        "narHash": "sha256-bobe52kteB5PyVZ4jzu47lHpj8bJQVk+k1rWqA0ZoTk=",
         "owner": "inductive-research",
         "repo": "nixpkgs",
-        "rev": "398e8912f71d7b149d086d9bf0a3695ff1ea98c7",
+        "rev": "de1a86a3a493f359576da3adf7c5d2954f8e5145",
         "type": "github"
       },
       "original": {

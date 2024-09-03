@@ -11,6 +11,7 @@ from .export import NixExporter
 from pathlib import Path
 from packaging.requirements import Requirement
 
+import os
 import json
 import urllib.parse
 import logging
@@ -25,7 +26,12 @@ PYTHON_PLATFORM_MAP = {
 }
 
 async def run(project_path, output_path, custom_paths):
-    res = CachedResources()
+    cache_path = (
+        Path(os.environ["XDG_CACHE_DIR"]) / "nixpy"
+        if "XDG_CACHE_DIR" in os.environ else
+        Path(os.environ["HOME"]) / ".cache" / "nixpy"
+    )
+    res = CachedResources(cache_path / "resources")
     # make the project requirement
     src = URLDistribution(f"file://{project_path}")
     project = await URLParser().parse(src, src.url, res)
@@ -54,11 +60,12 @@ async def run(project_path, output_path, custom_paths):
     pypi_provider = CachedProvider(res, 
         PyPIProvider(
             index_urls=index_urls, find_links=find_links
-        )
+        ),
+        cache_path / "pypi"
     )
     providers = [CustomProvider(p) for p in custom_paths]
     provider = CombinedProvider(providers + [pypi_provider])
-    projects = ProjectProvider(res, provider)
+    projects = ProjectProvider(res, provider, cache_path / "projects")
     resolver = Resolver(projects)
     # resolve the dependencies, and their associated
     # build environments. Returns all the recipes needed

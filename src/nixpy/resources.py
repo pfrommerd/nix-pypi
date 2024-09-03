@@ -1,5 +1,4 @@
 import urllib.parse
-import tempfile
 import requests
 import asyncio
 import os.path
@@ -39,9 +38,9 @@ class Resources:
             raise ValueError(f"Unrecognized scheme: {parsed.scheme} in {url}")
 
 class CachedResources(Resources):
-    def __init__(self, max_workers=16, cache_dir=None):
+    def __init__(self, cache_dir, max_workers=16):
         super().__init__(max_workers=max_workers)
-        self.cache_dir = Path(cache_dir) if cache_dir is not None else Path(tempfile.gettempdir()) / "resources-cache"
+        self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
     
     @contextlib.asynccontextmanager

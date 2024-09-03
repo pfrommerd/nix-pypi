@@ -19,7 +19,6 @@ import hashlib
 import packaging.utils
 import unearth.utils
 import urllib.parse
-import tempfile
 import asyncio
 import logging
 
@@ -154,7 +153,7 @@ class ProjectProvider:
     distributions: DistributionProvider
     # a cache location (if set to None, not used)
     # maps sources -> parsed projects
-    project_cache_dir : Path = field(default_factory=lambda: Path(tempfile.gettempdir()) / "project-cache")
+    project_cache_dir : Path
     loaded_projects : dict[str, dict[Version, Project]] = field(default_factory=dict)
 
     async def _project(self, d: Distribution):
@@ -327,6 +326,7 @@ class Candidate:
             if r.name == own_name: continue
             if Candidate._marker_satisfies(r.marker, env, extras):
                 yield r
+                continue
 
     def as_json(self):
         return {

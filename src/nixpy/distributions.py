@@ -1,5 +1,4 @@
 import json
-import tempfile
 import urllib.parse
 import itertools
 import asyncio
@@ -118,7 +117,7 @@ class CustomProvider(DistributionProvider):
 class CachedProvider(DistributionProvider):
     res: Resources
     provider : DistributionProvider
-    cache_path : Path = field(default_factory=lambda: Path(tempfile.gettempdir()) / "source-cache")
+    cache_path : Path
 
     async def find_distributions(self, r: Requirement) -> list[Distribution]:
         # if the requirement is a URL, return it
